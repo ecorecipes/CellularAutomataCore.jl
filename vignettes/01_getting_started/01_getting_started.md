@@ -1,0 +1,220 @@
+# Getting started
+Simon Frost
+
+- [Overview](#overview)
+- [A first automaton: rule 30](#a-first-automaton-rule-30)
+- [Other elementary rules](#other-elementary-rules)
+- [Saving less, stepping by hand](#saving-less-stepping-by-hand)
+- [Two dimensions: the Game of Life](#two-dimensions-the-game-of-life)
+- [Where next](#where-next)
+- [References](#references)
+
+## Overview
+
+A cellular automaton is a grid of cells, each in one of a few states,
+updated in discrete time steps. At every step each cell looks at its own
+state and the states of its neighbours and applies the same **local
+rule** to decide its next state ([Ceccherini-Silberstein and Coornaert
+2010](#ref-CeccheriniSilberstein2010)). Simple rules can produce
+strikingly complex behaviour.
+
+In `CellularAutomataCore.jl` a simulation has four ingredients:
+
+| ingredient             | example                                           |
+|------------------------|---------------------------------------------------|
+| a **rule**             | `Wolfram(30)`, `Life()`, or any function          |
+| an **initial state**   | an array, e.g. `single_seed(101)`                 |
+| a **time span**        | a number of steps, e.g. `50`                      |
+| a **space** (optional) | a ring or torus the size of the state, by default |
+
+They are bundled into a `CAProblem` and run with `solve`.
+
+``` julia
+ENV["GKSwstype"] = "100"  # headless plotting
+using CellularAutomataCore
+using Plots
+using Random
+```
+
+## A first automaton: rule 30
+
+Elementary cellular automata live on a line of cells with two states,
+`0` and `1`. Each cell’s next state depends on itself and its left and
+right neighbours. There are $2^3 = 8$ possible neighbourhoods, so a rule
+is a table of 8 bits; Wolfram’s numbering reads that table as a binary
+number. Rule 30 is the table `00011110`.
+
+``` julia
+u0 = single_seed(101)   # 101 cells, all 0 except the centre
+prob = CAProblem(Wolfram(30), u0, 50)
+sol = solve(prob)
+```
+
+    CASolution with 51 saved states at t = 0:…:50, retcode Success (Wolfram(30))
+
+`sol.u` holds the saved states and `sol.t` their times. By default every
+step is saved, so there are 51 states, from `t = 0` to `t = 50`.
+
+``` julia
+length(sol.u), sol.t[1], sol.t[end]
+```
+
+    (51, 0, 50)
+
+Plotting a one-dimensional solution draws a space-time diagram: one row
+per time step, time running downwards.
+
+``` julia
+plot(sol; c=:binary, colorbar=false, size=(700, 380), title="Rule 30")
+```
+
+![](01_getting_started_files/figure-commonmark/cell-5-output-1.svg)
+
+The same data as a single array, with time as the **last** axis:
+
+``` julia
+size(trajectory(sol))
+```
+
+    (101, 51)
+
+## Other elementary rules
+
+Rule 90 makes each cell the exclusive-or of its two neighbours. From a
+single seed it draws Pascal’s triangle modulo 2, the Sierpiński gasket:
+
+``` julia
+plot(solve(CAProblem(Wolfram(90), single_seed(129), 63));
+     c=:binary, colorbar=false, size=(700, 380), title="Rule 90")
+```
+
+![](01_getting_started_files/figure-commonmark/cell-7-output-1.svg)
+
+Wolfram sorted elementary rules into four classes by their behaviour
+from random initial states: uniform, periodic, chaotic and complex. Here
+is one rule from each, on a ring of 150 cells started from the same
+random state:
+
+``` julia
+u = Int8.(rand(Xoshiro(1), 0:1, 150))
+panels = map([250, 108, 30, 110]) do code
+    plot(solve(CAProblem(Wolfram(code), u, 100));
+         c=:binary, colorbar=false, title="Rule $code", xlabel="", ylabel="")
+end
+plot(panels...; layout=(2, 2), size=(800, 600))
+```
+
+![](01_getting_started_files/figure-commonmark/cell-8-output-1.svg)
+
+## Saving less, stepping by hand
+
+Long runs need not keep every state. `saveat` saves every `k` steps (or
+at the listed times); the first and last states are always kept.
+
+``` julia
+sol = solve(CAProblem(Wolfram(110), u, 1000); saveat=250)
+sol.t
+```
+
+    5-element Vector{Int64}:
+        0
+      250
+      500
+      750
+     1000
+
+For full control, `init` returns an integrator that advances with
+`step!`:
+
+``` julia
+integ = init(CAProblem(Wolfram(30), single_seed(31), 100); saveat=1000)
+step!(integ, 10)
+integ.t, sum(integ.u)
+```
+
+    (10, 11)
+
+## Two dimensions: the Game of Life
+
+Conway’s Game of Life is a two-state rule on a square grid. A dead cell
+with exactly three live neighbours (out of its eight) is born; a live
+cell with two or three live neighbours survives; every other cell dies
+or stays dead. It is written `B3/S23`, for “born with 3, survives with 2
+or 3”.
+
+A glider is a five-cell pattern that moves one cell diagonally every
+four steps. Patterns are often shared in run-length-encoded (RLE) form:
+
+``` julia
+glider, _ = parse_rle(raw"""
+x = 3, y = 3, rule = B3/S23
+bo$2bo$3o!
+""")
+glider
+```
+
+    3×3 Matrix{Int8}:
+     0  1  0
+     0  0  1
+     1  1  1
+
+`place!` copies the pattern into an empty 20 × 20 board. The default
+space is a torus, so the glider re-enters on the far side when it leaves
+the board.
+
+``` julia
+u0 = place!(zeros(Int8, 20, 20), glider, (2, 2))
+sol = solve(CAProblem(Life(), u0, 40); saveat=8)
+plot([plot(sol; snapshot=i, c=:binary, colorbar=false) for i in 1:6]...;
+     layout=(2, 3), size=(800, 540))
+```
+
+![](01_getting_started_files/figure-commonmark/cell-12-output-1.svg)
+
+After 40 steps the glider has moved 10 cells down and 10 to the right:
+
+``` julia
+final_state(sol) == circshift(u0, (10, 10))
+```
+
+    true
+
+From a random initial state Life settles into a mixture of still lifes,
+oscillators and gliders:
+
+``` julia
+soup = Int8.(rand(Xoshiro(42), 0:1, 120, 120))
+sol = solve(CAProblem(Life(), soup, 300); saveat=10)
+alive = [count(==(1), u) for u in sol.u]
+plot(plot(sol; c=:binary, colorbar=false),
+     plot(sol.t, alive; xlabel="t", ylabel="live cells", legend=false);
+     layout=(1, 2), size=(800, 360))
+```
+
+![](01_getting_started_files/figure-commonmark/cell-14-output-1.svg)
+
+## Where next
+
+- [Rule families](../02_rule_families/02_rule_families.qmd): Wolfram
+  codes with more states and wider neighbourhoods, totalistic rules,
+  Life-like and Generations rules, and reading and writing patterns.
+- [Spaces and
+  neighbourhoods](../03_spaces_and_neighbourhoods/03_spaces_and_neighbourhoods.qmd):
+  edges, hexagonal grids, three dimensions and graphs.
+- [Custom local
+  rules](../04_custom_local_rules/04_custom_local_rules.qmd): writing
+  your own rules, with any kind of state and with random numbers.
+
+## References
+
+<div id="refs" class="references csl-bib-body hanging-indent">
+
+<div id="ref-CeccheriniSilberstein2010" class="csl-entry">
+
+Ceccherini-Silberstein, Tullio, and Michel Coornaert. 2010. *Cellular
+Automata and Groups*. Springer Monographs in Mathematics. Springer.
+<https://doi.org/10.1007/978-3-642-14034-1>.
+
+</div>
+
+</div>

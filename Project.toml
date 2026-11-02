@@ -1,0 +1,55 @@
+name = "CellularAutomataCore"
+uuid = "a487d8a1-ae30-4227-807a-1df2ba951c8b"
+version = "0.1.0"
+authors = ["Simon Frost"]
+
+[deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
+RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
+SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
+
+[weakdeps]
+Agents = "46ada45e-f475-11e8-01d0-f70cc89e6671"
+Ark = "56664e29-41e4-4ea5-ab0e-825499acc647"
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Rasters = "a3a2b9e3-a471-40c9-b274-f788e487c689"
+
+[extensions]
+CellularAutomataCoreAgentsExt = ["Agents", "Random"]
+CellularAutomataCoreArkExt = ["Ark", "Random"]
+CellularAutomataCoreFFTWExt = "FFTW"
+CellularAutomataCoreKernelAbstractionsExt = "KernelAbstractions"
+CellularAutomataCoreRastersExt = "Rasters"
+
+[compat]
+Adapt = "4"
+Agents = "7"
+Aqua = "0.8"
+Ark = "0.5"
+CommonSolve = "0.2"
+FFTW = "1"
+JLArrays = "0.4"
+KernelAbstractions = "0.9"
+Random = "1"
+Rasters = "0.15"
+RecipesBase = "1"
+SciMLBase = "3"
+Test = "1"
+julia = "1.12"
+
+[extras]
+Agents = "46ada45e-f475-11e8-01d0-f70cc89e6671"
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+Ark = "56664e29-41e4-4ea5-ab0e-825499acc647"
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+JLArrays = "27aeb0d3-9eb9-45fb-866b-73c2ecf80fcb"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Rasters = "a3a2b9e3-a471-40c9-b274-f788e487c689"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Agents", "Aqua", "Ark", "FFTW", "JLArrays", "KernelAbstractions", "Random", "Rasters", "Test"]

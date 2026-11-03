@@ -63,10 +63,7 @@ count_walkers(w) = Ark.count_entities(Ark.Query(w, (Walker,)))
         @test sprint(show, agents_sprayers(:grid)) ==
               "AgentsBackend(:grid; agent_type=Sprayer)"
         @test sprint(show, ArkBackend()) == "ArkBackend(:grid)"
-        @test supports(AgentsBackend(), Margolus()) && !supports(ArkBackend(), Gillespie())
-        ev = EventRule((c, n, ctx) -> ())
-        @test_throws UnsupportedCombinationError solve(CAProblem(ev, u0, 1.0), Gillespie();
-                                                       backend=AgentsBackend())
+        @test supports(AgentsBackend(), Margolus()) && supports(ArkBackend(), Gillespie())
         @test_throws ArgumentError agent_model(init(prob))
     end
 
@@ -152,6 +149,47 @@ count_walkers(w) = Ark.count_entities(Ark.Query(w, (Walker,)))
                      callback=PresetTimeCallback([5, 10], add!))
         solve!(integ)
         @test Agents.nagents(agent_model(integ)) == 2
+    end
+
+    @testset "continuous time (Gillespie)" begin
+        ev = EventRule(VonNeumann(1)) do c, n, ctx
+            return c == 0 ? (0.6 * count(==(1), n) => Int8(1),) : (1.0 => Int8(0),)
+        end
+        cprob = CAProblem(ev, u0, 12.0; seed=4)
+        for m in (:next_reaction, :composition_rejection)
+            ref = solve(cprob, Gillespie(m); saveat=0:12)
+            for b in (AgentsBackend(:grid), AgentsBackend(:cells), ArkBackend(:grid),
+                      ArkBackend(:cells))
+                @test solve(cprob, Gillespie(m); saveat=0:12, backend=b).u == ref.u
+            end
+        end
+        # mobile agents act at every whole time, the same in both packages and modes
+        sols = [solve(cprob, Gillespie(); saveat=0:12, backend=b)
+                for b in (agents_sprayers(:grid), agents_sprayers(:cells),
+                          ark_sprayers(:grid), ark_sprayers(:cells))]
+        @test all(s -> s.u == sols[1].u, sols)
+        @test sols[1].u != solve(cprob, Gillespie(); saveat=0:12).u
+        seen = Int[]
+        b = AgentsBackend(:grid; (model_step!)=m -> push!(seen, m.t))
+        solve(cprob, Gillespie(); backend=b)
+        @test seen == 1:12
+        empty!(seen)
+        solve(cprob, Gillespie();
+              backend=ArkBackend(:cells; (update!)=(w, p, t) -> push!(seen, t)))
+        @test seen == 1:12
+        # what they change is in the state saved at that time, and the rates follow it
+        clear = AgentsBackend(:cells;
+                              (model_step!)=m -> m.t == 5 &&
+                                                 foreach(I -> write_cell!(m, I, 0),
+                                                         CartesianIndices((20, 20))))
+        s = solve(cprob, Gillespie(); saveat=0:12, backend=clear)
+        @test sum(s.u[5]) > 0 && all(u -> sum(u) == 0, s.u[6:end])
+        integ = init(cprob, Gillespie(); saveat=0:12, backend=ark_sprayers(:cells))
+        solve!(integ)
+        first_run = copy(integ.sol_u)
+        reinit!(integ)
+        solve!(integ)
+        @test integ.sol_u == first_run == sols[1].u
     end
 
     @testset "ensembles" begin

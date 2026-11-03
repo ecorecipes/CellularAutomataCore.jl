@@ -104,21 +104,29 @@ the solution's `t` is a `Vector{Float64}`.
   of waiting times). The cost of an event does not grow with the lattice.
 - `:direct`: the direct method, summing all rates at every event; slow, kept as
   a reference.
+- `:composition_rejection`: the direct method with composition–rejection
+  selection [Slepoy2008](@cite): cells are grouped by the binary order of
+  magnitude of their rates, an event picks a group by its total rate and then a
+  member by rejection, so its cost does not grow with the lattice either.
 
 Random numbers are counter-based, as everywhere in the package: the
 next-reaction method draws cell `i`'s `n`-th waiting time from `(seed, i, n)`,
-so runs are reproducible. The two methods sample the same process but consume
-draws differently, so they agree in distribution, not path by path.
+so runs are reproducible. The methods sample the same process but consume draws
+differently, so they agree in distribution, not path by path.
 
 Rates are recomputed when a callback changes the state or `integ.p`, and at
 every whole time when a covariate has a time axis (the rule sees `ctx.t`, the
-integer part of the time). Kernel fields are not supported yet.
+integer part of the time). [`KernelField`](@ref)s are kept up to date event by
+event: when a cell changes, the cells that read it gain its weighted change and
+their rates are recomputed, so an event costs time in proportion to the
+kernel's size; the fields are recomputed from the state after every `n` events
+on `n` cells, so rounding does not accumulate.
 """
 struct Gillespie <: AbstractScheme
     method::Symbol
     function Gillespie(method::Symbol=:next_reaction)
-        method in (:next_reaction, :direct) ||
-            throw(ArgumentError("Gillespie method must be :next_reaction or :direct, got :$method"))
+        method in (:next_reaction, :direct, :composition_rejection) ||
+            throw(ArgumentError("Gillespie method must be :next_reaction, :direct or :composition_rejection, got :$method"))
         return new(method)
     end
 end

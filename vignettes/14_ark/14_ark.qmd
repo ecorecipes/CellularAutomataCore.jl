@@ -249,6 +249,33 @@ over half the crop has been rogued, and at the end about one plant in six is
 healthy, against one in twenty untreated. With aphids flying in all season, the virus
 reaches healthy plants faster than weekly scouting can find the sick ones.
 
+## In continuous time
+
+The crop can also be written as rates and simulated event by event with
+`Gillespie()`, the aphids still flying once a day. With an agent backend the
+run stops at every whole day for the mobile agents, whose `update!` sees the
+day as an integer, exactly as after each step in discrete time. Here a plant
+is infected by each symptomatic neighbour at the rate that gives the daily
+probability `ε`, and becomes symptomatic at the rate that gives `1/τ` a day:
+
+```{julia}
+crop_rates = EventRule(VonNeumann(1)) do cell, nbrs, ctx
+    cell == 0 && return (-log(1 - ctx.p.ε) * count(==(2), nbrs) => Int8(1),)
+    cell == 1 && return (-log(1 - 1 / ctx.p.τ) => Int8(2),)
+    return ()
+end
+continuous = EnsembleProblem(CAProblem(crop_rates, u0, 60.0, p; seed=1);
+                             output_func=(s, ctx) -> (count(>(0), final_state(s)) / n^2,
+                                                      false))
+cruns = solve(continuous, Gillespie(), EnsembleThreads(); trajectories=40, backend,
+              save_everystep=false)
+(discrete=(mean=mean(runs.u), sd=std(runs.u)), continuous=(mean=mean(cruns.u), sd=std(cruns.u)))
+```
+
+The two agree closely, with a mean of about 0.32 of the plants infected at day
+60 in both: the daily probabilities of root contact and of symptoms are small,
+so a day is a small step for them, and the aphids act once a day in both.
+
 ## Choosing a backend
 
 Without mobile agents every agent backend gives exactly the result of

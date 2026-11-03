@@ -5,9 +5,11 @@ Simon Frost
 - [Rules as rates](#rules-as-rates)
 - [One event at a time](#one-event-at-a-time)
 - [Summaries over time](#summaries-over-time)
-- [Next-reaction and direct methods](#next-reaction-and-direct-methods)
+- [Three methods](#three-methods)
 - [Interventions at exact times](#interventions-at-exact-times)
 - [A sparse, seasonal landscape](#a-sparse-seasonal-landscape)
+- [Dispersal through a kernel](#dispersal-through-a-kernel)
+- [Large, mostly empty landscapes](#large-mostly-empty-landscapes)
 - [Ensembles](#ensembles)
 - [The same rule in discrete time](#the-same-rule-in-discrete-time)
 
@@ -105,36 +107,44 @@ plot(prevalence.t, prevalence.saveval; xlabel="time", ylabel="prevalence", legen
 
 ![](12_event_driven_files/figure-commonmark/cell-7-output-1.svg)
 
-## Next-reaction and direct methods
+## Three methods
 
 `Gillespie(:next_reaction)`, the default, gives every cell its own
 exponential clock in a heap. After an event it recomputes only the cell
 and its neighbours, so an event costs the same however large the lattice
 is. `Gillespie(:direct)` sums every rate at every event; it is simple
-and serves as a reference. The two sample the same process but use their
-random numbers differently, so they agree in distribution, not path by
-path.
+and serves as a reference. `Gillespie(:composition_rejection)` ([Slepoy
+et al. 2008](#ref-Slepoy2008)) is the direct method made fast: cells are
+grouped by the binary order of magnitude of their rates, an event picks
+a group by its total rate and then a cell in it by rejection, so it too
+costs the same however large the lattice is. The three sample the same
+process but use their random numbers differently, so they agree in
+distribution, not path by path.
 
 ``` julia
 function final_prevalences(method; reps=40)
     [mean(final_state(solve(remake(prob; tspan=3.0, seed=s), Gillespie(method))))
      for s in 1:reps]
 end
-nr, dm = final_prevalences(:next_reaction), final_prevalences(:direct)
-(next_reaction=(mean(nr), std(nr)), direct=(mean(dm), std(dm)))
+[(; method, mean=mean(v), sd=std(v))
+ for (method, v) in ((m, final_prevalences(m))
+                     for m in (:next_reaction, :direct, :composition_rejection))]
 ```
 
-    (next_reaction = (0.0823575, 0.008374898009329229), direct = (0.08184750000000002, 0.00795738610284455))
+    3-element Vector{@NamedTuple{method::Symbol, mean::Float64, sd::Float64}}:
+     (method = :next_reaction, mean = 0.0823575, sd = 0.008374898009329229)
+     (method = :direct, mean = 0.08184750000000002, sd = 0.00795738610284455)
+     (method = :composition_rejection, mean = 0.08067499999999998, sd = 0.00755885454624456)
 
 ``` julia
 small = remake(prob; tspan=3.0)
-solve(small, Gillespie(:next_reaction)); solve(small, Gillespie(:direct))
-t_nr = @elapsed solve(small, Gillespie(:next_reaction))
-t_dm = @elapsed solve(small, Gillespie(:direct))
-(next_reaction=t_nr, direct=t_dm, ratio=t_dm / t_nr)
+times = map((:next_reaction, :direct, :composition_rejection)) do m
+    solve(small, Gillespie(m))
+    return m => @elapsed solve(small, Gillespie(m))
+end
 ```
 
-    (next_reaction = 0.00238175, direct = 0.032254333, ratio = 13.542283195129631)
+    (:next_reaction => 0.002112667, :direct => 0.038457667, :composition_rejection => 0.001979584)
 
 The random numbers are counter-based, as everywhere in the package: a
 cell’s `n`-th waiting time is a function of the seed, the cell and `n`
@@ -243,6 +253,60 @@ plot([plot(Torus(m, m), u; c=[:white, :palegreen, :red, :grey40], clims=(0, 3),
 
 ![](12_event_driven_files/figure-commonmark/cell-14-output-1.svg)
 
+## Dispersal through a kernel
+
+Spores and insects travel farther than the next cell. A rule reads such
+long-range pressure from a `KernelField`, a weighted sum of a cell-level
+quantity over a dispersal kernel. In continuous time the field is kept
+up to date event by event: when a cell changes, every cell that reads it
+within the kernel gains its weighted change, and their rates are
+recomputed. An event then costs time in proportion to the kernel’s size,
+not the lattice’s.
+
+``` julia
+spores = EventRule() do c, nbrs, ctx
+    c == 0 ? (ctx.p.β * field(ctx, :pressure) => 1,) : c == 1 ? (ctx.p.γ => 2,) : ()
+end
+pressure = KernelField(ExponentialKernel(2.0), c -> Float64(c == 1); include_centre=false)
+v0 = zeros(Int8, 120, 120)
+v0[60, 60] = 1
+kp = CAProblem(spores, v0, 14.0, (β=2.0, γ=1.0); space=Torus(120, 120), seed=2,
+               fields=(; pressure))
+ksol = solve(kp, Gillespie(); saveat=[6.0, 10.0, 14.0])
+plot([plot(Torus(120, 120), u; c=[:palegreen, :red, :grey40], clims=(0, 2),
+           colorbar=false, title="t = $t") for (t, u) in zip(ksol.t[2:end], ksol.u[2:end])]...;
+     layout=(1, 3), size=(800, 280))
+```
+
+![](12_event_driven_files/figure-commonmark/cell-15-output-1.svg)
+
+With exponential dispersal of mean distance two cells, the epidemic
+grows as a ragged front with satellite foci ahead of it, which a
+nearest-neighbour rule cannot produce.
+
+## Large, mostly empty landscapes
+
+An invasion that starts from a few cells touches little of a large
+lattice for a long time. `SparseBackend` keeps only the parts of the
+lattice that differ from a background state; with `Gillespie` it gives
+clocks only to the cells that differ and to the cells near them, which
+are the only ones that can have a positive rate (the rule must give a
+background cell among background neighbours rate zero). The run equals
+the `ArrayBackend` run event for event, at a fraction of the memory:
+
+``` julia
+big = zeros(Int8, 2000, 2000)
+big[1000:1002, 1000:1002] .= 1
+bp = CAProblem(sis, big, 8.0, (β=0.6, γ=1.0); space=Torus(2000, 2000), seed=1)
+sparse = solve(bp, Gillespie(); backend=SparseBackend(Int8(0)), save_everystep=false)
+dense = solve(bp, Gillespie(); save_everystep=false)
+memory(b) = Base.summarysize(init(bp, Gillespie(); backend=b, save_everystep=false).state)
+(same=final_state(sparse) == final_state(dense), infected=sum(final_state(sparse)),
+ sparse_MB=memory(SparseBackend(Int8(0))) / 1e6, dense_MB=memory(ArrayBackend()) / 1e6)
+```
+
+    (same = true, infected = 59, sparse_MB = 0.066304, dense_MB = 484.000648)
+
 ## Ensembles
 
 An `EnsembleProblem` gives every trajectory its own seed, as in discrete
@@ -256,7 +320,7 @@ histogram(ens.u ./ count(hosts); bins=15, xlabel="fraction of hosts removed",
           ylabel="trajectories", legend=false, size=(500, 300))
 ```
 
-![](12_event_driven_files/figure-commonmark/cell-15-output-1.svg)
+![](12_event_driven_files/figure-commonmark/cell-17-output-1.svg)
 
 ## The same rule in discrete time
 
@@ -287,4 +351,25 @@ end
 plot!()
 ```
 
-![](12_event_driven_files/figure-commonmark/cell-16-output-1.svg)
+![](12_event_driven_files/figure-commonmark/cell-18-output-1.svg)
+
+```@raw html
+<div id="refs" class="references csl-bib-body hanging-indent">
+```
+
+```@raw html
+<div id="ref-Slepoy2008" class="csl-entry">
+```
+
+Slepoy, Alexander, Aidan P. Thompson, and Steven J. Plimpton. 2008. “A
+Constant-Time Kinetic Monte Carlo Algorithm for Simulation of Large
+Biochemical Reaction Networks.” *The Journal of Chemical Physics* 128
+(20): 205101. <https://doi.org/10.1063/1.2919546>.
+
+```@raw html
+</div>
+```
+
+```@raw html
+</div>
+```

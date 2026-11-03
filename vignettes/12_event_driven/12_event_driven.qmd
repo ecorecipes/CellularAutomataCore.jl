@@ -92,30 +92,35 @@ solve(prob, Gillespie(); callback=SavingCallback((u, t, integ) -> mean(u), preva
 plot(prevalence.t, prevalence.saveval; xlabel="time", ylabel="prevalence", legend=false)
 ```
 
-## Next-reaction and direct methods
+## Three methods
 
 `Gillespie(:next_reaction)`, the default, gives every cell its own exponential
 clock in a heap. After an event it recomputes only the cell and its neighbours,
 so an event costs the same however large the lattice is. `Gillespie(:direct)`
-sums every rate at every event; it is simple and serves as a reference. The two
-sample the same process but use their random numbers differently, so they agree
-in distribution, not path by path.
+sums every rate at every event; it is simple and serves as a reference.
+`Gillespie(:composition_rejection)` [@Slepoy2008] is the direct method made
+fast: cells are grouped by the binary order of magnitude of their rates, an
+event picks a group by its total rate and then a cell in it by rejection, so it
+too costs the same however large the lattice is. The three sample the same
+process but use their random numbers differently, so they agree in
+distribution, not path by path.
 
 ```{julia}
 function final_prevalences(method; reps=40)
     [mean(final_state(solve(remake(prob; tspan=3.0, seed=s), Gillespie(method))))
      for s in 1:reps]
 end
-nr, dm = final_prevalences(:next_reaction), final_prevalences(:direct)
-(next_reaction=(mean(nr), std(nr)), direct=(mean(dm), std(dm)))
+[(; method, mean=mean(v), sd=std(v))
+ for (method, v) in ((m, final_prevalences(m))
+                     for m in (:next_reaction, :direct, :composition_rejection))]
 ```
 
 ```{julia}
 small = remake(prob; tspan=3.0)
-solve(small, Gillespie(:next_reaction)); solve(small, Gillespie(:direct))
-t_nr = @elapsed solve(small, Gillespie(:next_reaction))
-t_dm = @elapsed solve(small, Gillespie(:direct))
-(next_reaction=t_nr, direct=t_dm, ratio=t_dm / t_nr)
+times = map((:next_reaction, :direct, :composition_rejection)) do m
+    solve(small, Gillespie(m))
+    return m => @elapsed solve(small, Gillespie(m))
+end
 ```
 
 The random numbers are counter-based, as everywhere in the package: a cell's
@@ -203,6 +208,55 @@ ssol = solve(p, Gillespie(); saveat=6.0)
 plot([plot(Torus(m, m), u; c=[:white, :palegreen, :red, :grey40], clims=(0, 3),
            colorbar=false, title="t = $t") for (t, u) in zip(ssol.t[2:end], ssol.u[2:end])]...;
      layout=(1, 4), size=(950, 260))
+```
+
+## Dispersal through a kernel
+
+Spores and insects travel farther than the next cell. A rule reads such
+long-range pressure from a `KernelField`, a weighted sum of a cell-level
+quantity over a dispersal kernel. In continuous time the field is kept up to
+date event by event: when a cell changes, every cell that reads it within the
+kernel gains its weighted change, and their rates are recomputed. An event then
+costs time in proportion to the kernel's size, not the lattice's.
+
+```{julia}
+spores = EventRule() do c, nbrs, ctx
+    c == 0 ? (ctx.p.β * field(ctx, :pressure) => 1,) : c == 1 ? (ctx.p.γ => 2,) : ()
+end
+pressure = KernelField(ExponentialKernel(2.0), c -> Float64(c == 1); include_centre=false)
+v0 = zeros(Int8, 120, 120)
+v0[60, 60] = 1
+kp = CAProblem(spores, v0, 14.0, (β=2.0, γ=1.0); space=Torus(120, 120), seed=2,
+               fields=(; pressure))
+ksol = solve(kp, Gillespie(); saveat=[6.0, 10.0, 14.0])
+plot([plot(Torus(120, 120), u; c=[:palegreen, :red, :grey40], clims=(0, 2),
+           colorbar=false, title="t = $t") for (t, u) in zip(ksol.t[2:end], ksol.u[2:end])]...;
+     layout=(1, 3), size=(800, 280))
+```
+
+With exponential dispersal of mean distance two cells, the epidemic grows as a
+ragged front with satellite foci ahead of it, which a nearest-neighbour rule
+cannot produce.
+
+## Large, mostly empty landscapes
+
+An invasion that starts from a few cells touches little of a large lattice for
+a long time. `SparseBackend` keeps only the parts of the lattice that differ
+from a background state; with `Gillespie` it gives clocks only to the cells
+that differ and to the cells near them, which are the only ones that can have
+a positive rate (the rule must give a background cell among background
+neighbours rate zero). The run equals the `ArrayBackend` run event for event,
+at a fraction of the memory:
+
+```{julia}
+big = zeros(Int8, 2000, 2000)
+big[1000:1002, 1000:1002] .= 1
+bp = CAProblem(sis, big, 8.0, (β=0.6, γ=1.0); space=Torus(2000, 2000), seed=1)
+sparse = solve(bp, Gillespie(); backend=SparseBackend(Int8(0)), save_everystep=false)
+dense = solve(bp, Gillespie(); save_everystep=false)
+memory(b) = Base.summarysize(init(bp, Gillespie(); backend=b, save_everystep=false).state)
+(same=final_state(sparse) == final_state(dense), infected=sum(final_state(sparse)),
+ sparse_MB=memory(SparseBackend(Int8(0))) / 1e6, dense_MB=memory(ArrayBackend()) / 1e6)
 ```
 
 ## Ensembles

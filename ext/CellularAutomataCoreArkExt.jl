@@ -6,7 +6,9 @@ module CellularAutomataCoreArkExt
 using Ark: Ark, Entity, Query, World, add_resource!, get_components, get_resource,
            new_entity!, remove_entity!, set_components!
 using CellularAutomataCore
-using CellularAutomataCore: _cell_index, _cell_type, _convert_cell, _linear_index, _read
+using CellularAutomataCore: _EventState, _cell_index, _cell_type, _convert_cell,
+                            _linear_index,
+                            _read, _template
 using Random: Xoshiro
 
 const CAC = CellularAutomataCore
@@ -86,7 +88,8 @@ function CAC.advance!(b::ArkBackend, st::ArkState, prob, scheme, params, t)
 end
 
 function CAC.current_state(::ArkBackend, st::ArkState)
-    _gather!(st.world, st.data)
+    # in continuous time the cell entities follow the working state event by event
+    st.data.work isa _EventState || _gather!(st.world, st.data)
     return CAC.current_state(st.data.array, st.data.work)
 end
 
@@ -98,12 +101,29 @@ function CAC.set_state!(::ArkBackend, st::ArkState, u)
         for (i, I) in enumerate(d.index)
             _set_cell!(st.world, d, i, _read(u, I))
         end
+        d.work isa _EventState && _gather!(st.world, d)
     end
     return nothing
 end
 
 function _set_cell!(world, d::ArkData{S}, i, v) where {S}
-    set_components!(world, d.entities[i], (CACell{S}(i, _convert_cell(d.work.cur, v)),))
+    set_components!(world, d.entities[i],
+                    (CACell{S}(i, _convert_cell(_template(d.work), v)),))
+    return nothing
+end
+
+# Continuous time (Gillespie): the event state is the working state; after an event the cell
+# that changed is copied to its entity, and mobile agents act at every whole time.
+CAC._events(::ArkBackend, st::ArkState) = st.data.work
+function CAC._after_fire!(::ArkBackend, st::ArkState, id)
+    d = st.data
+    d isa GridData && return nothing
+    return _set_cell!(st.world, d, id, CAC.read_cell(d.array, d.work, d.index[id]))
+end
+CAC._mobile_agents(b::ArkBackend) = b.update! !== nothing
+function CAC._agents_act!(b::ArkBackend, st::ArkState, prob, p, t)
+    b.update!(st.world, p, floor(Int, t))
+    _gather!(st.world, st.data)
     return nothing
 end
 
@@ -141,6 +161,7 @@ function CAC._restart!(st::ArkState, prob, p, t0)
     end
     foreach(e -> remove_entity!(world, e), doomed)
     copy!(get_resource(world, Xoshiro), Xoshiro(prob.seed))
+    CAC._restart!(d.work, prob, p, t0)
     d.init! === nothing || d.init!(world, p)
     return nothing
 end

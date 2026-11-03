@@ -7,8 +7,8 @@ using Agents: Agents, AbstractAgent, GridSpace, StandardABM, abmproperties, abmr
               add_agent!,
               allids, dummystep, remove_agent!
 using CellularAutomataCore
-using CellularAutomataCore: Lattice, _cell_index, _cell_type, _convert_cell, _linear_index,
-                            _read
+using CellularAutomataCore: Lattice, _EventState, _cell_index, _cell_type, _convert_cell,
+                            _linear_index, _read, _template
 using Random: Xoshiro
 
 const CAC = CellularAutomataCore
@@ -59,7 +59,9 @@ function CAC.allocate_state(b::AgentsBackend, prob::CAProblem, scheme::AbstractS
     cellvec = b.mode === :cells ? Vector{C}(undef, length(index)) : nothing
     A = b.agent_type === nothing ? C :
         b.mode === :cells ? Union{C,b.agent_type} : b.agent_type
-    props = CAProperties(prob.p, prob.tspan[1], prob.space, work, array, cellvec, index,
+    props = CAProperties(prob.p, floor(Int, prob.tspan[1]), prob.space, work, array,
+                         cellvec,
+                         index,
                          b.init!)
     model = StandardABM(A, _abm_space(prob.space);
                         (agent_step!)=something(b.agent_step!, dummystep),
@@ -107,7 +109,8 @@ end
 
 function CAC.current_state(::AgentsBackend, model::StandardABM)
     props = abmproperties(model)
-    _gather!(props)
+    # in continuous time the cell agents follow the working state event by event
+    props.work isa _EventState || _gather!(props)
     return CAC.current_state(props.array, props.work)
 end
 
@@ -117,8 +120,9 @@ function CAC.set_state!(::AgentsBackend, model::StandardABM, u)
         CAC.set_state!(props.array, props.work, u)
     else
         for (a, I) in zip(props.cells, props.index)
-            a.state = _convert_cell(props.work.cur, _read(u, I))
+            a.state = _convert_cell(_template(props.work), _read(u, I))
         end
+        props.work isa _EventState && _gather!(props)
     end
     return nothing
 end
@@ -137,7 +141,31 @@ function _write_host!(props::GridProperties, I, v)
     return CAC.write_cell!(props.array, props.work, _cell_index(props.space, I), v)
 end
 function _write_host!(props::CAProperties, I, v)
-    props.cells[_linear_index(props.space, I)].state = _convert_cell(props.work.cur, v)
+    props.cells[_linear_index(props.space, I)].state = _convert_cell(_template(props.work),
+                                                                     v)
+    return nothing
+end
+
+# Continuous time (Gillespie): the event state is the working state; after an event the cell
+# that changed is copied to its cell agent, and mobile agents act at every whole time.
+CAC._events(::AgentsBackend, model::StandardABM) = abmproperties(model).work
+function CAC._after_fire!(::AgentsBackend, model::StandardABM, id)
+    return _copy_cell!(abmproperties(model), id)
+end
+_copy_cell!(::GridProperties, id) = nothing
+function _copy_cell!(props::CAProperties, id)
+    props.cells[id].state = CAC.read_cell(props.array, props.work, props.index[id])
+    return nothing
+end
+function CAC._mobile_agents(b::AgentsBackend)
+    return b.agent_step! !== nothing || b.model_step! !== nothing
+end
+function CAC._agents_act!(::AgentsBackend, model::StandardABM, prob, p, t)
+    props = abmproperties(model)
+    props.p = p
+    props.t = floor(Int, t)
+    Agents.step!(model, 1)
+    _gather!(props)
     return nothing
 end
 
@@ -154,7 +182,8 @@ function CAC._restart!(model::StandardABM, prob, p, t0)
     getfield(model, :time)[] = 0
     copy!(abmrng(model), Xoshiro(prob.seed))
     props.p = p
-    props.t = t0
+    props.t = floor(Int, t0)
+    CAC._restart!(props.work, prob, p, t0)
     props.init! === nothing || props.init!(model)
     return nothing
 end

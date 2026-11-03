@@ -47,7 +47,10 @@ Mobile agents are of type `agent_type` (an `@agent` type for the space).
 [`agent_model`](@ref)`(integ)` returns the model.
 
 Without mobile agents the result equals that of [`ArrayBackend`](@ref) exactly.
-Runs every discrete-time scheme; the sweep uses `ArrayBackend(; threaded)`.
+Runs every discrete-time scheme; the sweep uses `ArrayBackend(; threaded)`. It
+also runs [`Gillespie`](@ref): the cells change event by event as on
+[`ArrayBackend`](@ref), and the mobile agents act at every whole time (the
+run stops there for them), seeing the time as an integer.
 """
 struct AgentsBackend{A,I,G,M} <: AbstractBackend
     mode::Symbol
@@ -88,7 +91,10 @@ problem's seed. From a callback, [`agent_model`](@ref)`(integ)` returns the
 world.
 
 Without mobile agents the result equals that of [`ArrayBackend`](@ref) exactly.
-Runs every discrete-time scheme; the sweep uses `ArrayBackend(; threaded)`.
+Runs every discrete-time scheme; the sweep uses `ArrayBackend(; threaded)`. It
+also runs [`Gillespie`](@ref): the cells change event by event as on
+[`ArrayBackend`](@ref), and the mobile agents act at every whole time (the
+run stops there for them), seeing the time as an integer.
 """
 struct ArkBackend{C<:Tuple,I,U} <: AbstractBackend
     mode::Symbol
@@ -161,7 +167,7 @@ those of [`read_cell`](@ref).
 """
 function write_cell! end
 
-supports(::_AgentBackend, ::Union{_GatedScheme,RandomSequential,Margolus}) = true
+supports(::_AgentBackend, ::Union{_GatedScheme,RandomSequential,Margolus,Gillespie}) = true
 
 function allocate_state(b::AgentsBackend, prob, scheme)
     return throw(ArgumentError("AgentsBackend needs Agents.jl: run `using Agents`"))

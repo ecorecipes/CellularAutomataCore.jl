@@ -18,7 +18,11 @@ background must stay background, at every cell and time. Rules with spontaneous
 events (a lightning strike in an empty forest) are not, and are rejected when
 the problem is set up if a sample of cells shows it. Runs
 [`Synchronous`](@ref) and [`Stochastic`](@ref) on lattices without kernel
-fields; masks and covariates are supported.
+fields; masks and covariates are supported. It also runs
+[`Gillespie`](@ref)`(:next_reaction)` for an [`EventRule`](@ref) whose
+background cells with background neighbours have rate zero: only those cells
+and the cells near them get clocks, and a run equals the
+[`ArrayBackend`](@ref)'s run event for event.
 """
 struct SparseBackend{T} <: AbstractBackend
     background::T
@@ -32,6 +36,7 @@ function SparseBackend(background; tilesize::Integer=32,
 end
 
 supports(::SparseBackend, ::Union{Synchronous,Stochastic}) = true
+supports(::SparseBackend, g::Gillespie) = g.method === :next_reaction
 
 function check_problem(b::SparseBackend, prob, scheme)
     prob.space isa Lattice ||
@@ -43,10 +48,18 @@ function check_problem(b::SparseBackend, prob, scheme)
     nbrs = map(_ -> bg, prob.neighbours.offsets)
     env = _Env(prob.p, prob.covariates, (;), prob.mask, prob.seed)
     lin = LinearIndices(size(prob.space))
-    for I in Iterators.take(cells(prob.space), 64), t in prob.tspan[1]:(prob.tspan[1] + 3)
-        v = local_rule(prob.rule, bg, nbrs, _context(env, I, t, lin[I]))
-        v == bg ||
-            throw(ArgumentError("SparseBackend needs a quiescent rule: a background cell with background neighbours became $v at cell $I, t = $t"))
+    t0 = floor(Int, prob.tspan[1])
+    for I in Iterators.take(cells(prob.space), 64), t in t0:(t0 + 3)
+        ctx = _context(env, I, t, lin[I])
+        if prob.rule isa EventRule
+            a = _total_rate(prob.rule.f(bg, nbrs, ctx))
+            iszero(a) ||
+                throw(ArgumentError("SparseBackend needs a quiescent rule: a background cell with background neighbours has rate $a at cell $I, t = $t"))
+        else
+            v = local_rule(prob.rule, bg, nbrs, ctx)
+            v == bg ||
+                throw(ArgumentError("SparseBackend needs a quiescent rule: a background cell with background neighbours became $v at cell $I, t = $t"))
+        end
     end
     return nothing
 end
@@ -249,5 +262,7 @@ holds `tilesize^N` cells.
 function stored_tiles(integ)
     integ.backend isa SparseBackend ||
         throw(ArgumentError("stored_tiles needs an integrator on a SparseBackend"))
-    return count(!isnothing, integ.state.cur)
+    st = integ.state
+    tiles = hasproperty(st, :tiles) ? st.tiles : st
+    return count(!isnothing, tiles.cur)
 end

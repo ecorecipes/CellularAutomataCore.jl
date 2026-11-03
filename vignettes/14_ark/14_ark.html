@@ -2228,6 +2228,7 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
   <li><a href="#the-crop" id="toc-the-crop" class="nav-link" data-scroll-target="#the-crop">The crop</a></li>
   <li><a href="#aphids-as-entities" id="toc-aphids-as-entities" class="nav-link" data-scroll-target="#aphids-as-entities">Aphids as entities</a></li>
   <li><a href="#one-entity-per-plant" id="toc-one-entity-per-plant" class="nav-link" data-scroll-target="#one-entity-per-plant">One entity per plant</a></li>
+  <li><a href="#in-continuous-time" id="toc-in-continuous-time" class="nav-link" data-scroll-target="#in-continuous-time">In continuous time</a></li>
   <li><a href="#choosing-a-backend" id="toc-choosing-a-backend" class="nav-link" data-scroll-target="#choosing-a-backend">Choosing a backend</a></li>
   </ul>
 <div class="quarto-alternate-formats"><h2>Other Formats</h2><ul><li><a href="14_ark.md"><i class="bi bi-file-code"></i>Github (GFM)</a></li><li><a href="14_ark.pdf"><i class="bi bi-file-pdf"></i>PDF</a></li></ul></div></nav>
@@ -2468,33 +2469,54 @@ var requirejs,require,define;(function(global,setTimeout){var req,s,head,baseEle
 </div>
 <p>Roguing keeps the infected plants left standing to about a quarter of the field, against nearly all of it untreated, but mostly by removing them: well over half the crop has been rogued, and at the end about one plant in six is healthy, against one in twenty untreated. With aphids flying in all season, the virus reaches healthy plants faster than weekly scouting can find the sick ones.</p>
 </section>
+<section id="in-continuous-time" class="level2">
+<h2 class="anchored" data-anchor-id="in-continuous-time">In continuous time</h2>
+<p>The crop can also be written as rates and simulated event by event with <code>Gillespie()</code>, the aphids still flying once a day. With an agent backend the run stops at every whole day for the mobile agents, whose <code>update!</code> sees the day as an integer, exactly as after each step in discrete time. Here a plant is infected by each symptomatic neighbour at the rate that gives the daily probability <code>ε</code>, and becomes symptomatic at the rate that gives <code>1/τ</code> a day:</p>
+<div id="26" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>crop_rates <span class="op">=</span> <span class="fu">EventRule</span>(<span class="fu">VonNeumann</span>(<span class="fl">1</span>)) <span class="cf">do</span> cell, nbrs, ctx</span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>    cell <span class="op">==</span> <span class="fl">0</span> <span class="op">&amp;&amp;</span> <span class="cf">return</span> (<span class="fu">-log</span>(<span class="fl">1</span> <span class="op">-</span> ctx.p.ε) <span class="op">*</span> <span class="fu">count</span>(<span class="op">==</span>(<span class="fl">2</span>), nbrs) <span class="op">=&gt;</span> <span class="fu">Int8</span>(<span class="fl">1</span>),)</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>    cell <span class="op">==</span> <span class="fl">1</span> <span class="op">&amp;&amp;</span> <span class="cf">return</span> (<span class="fu">-log</span>(<span class="fl">1</span> <span class="op">-</span> <span class="fl">1</span> <span class="op">/</span> ctx.p.τ) <span class="op">=&gt;</span> <span class="fu">Int8</span>(<span class="fl">2</span>),)</span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> ()</span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>continuous <span class="op">=</span> <span class="fu">EnsembleProblem</span>(<span class="fu">CAProblem</span>(crop_rates, u0, <span class="fl">60.0</span>, p; seed<span class="op">=</span><span class="fl">1</span>);</span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>                             output_func<span class="op">=</span>(s, ctx) <span class="op">-&gt;</span> (<span class="fu">count</span>(<span class="fu">&gt;</span>(<span class="fl">0</span>), <span class="fu">final_state</span>(s)) <span class="op">/</span> n<span class="op">^</span><span class="fl">2</span>,</span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>                                                      <span class="cn">false</span>))</span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a>cruns <span class="op">=</span> <span class="fu">solve</span>(continuous, <span class="fu">Gillespie</span>(), <span class="fu">EnsembleThreads</span>(); trajectories<span class="op">=</span><span class="fl">40</span>, backend,</span>
+<span id="cb20-10"><a href="#cb20-10" aria-hidden="true" tabindex="-1"></a>              save_everystep<span class="op">=</span><span class="cn">false</span>)</span>
+<span id="cb20-11"><a href="#cb20-11" aria-hidden="true" tabindex="-1"></a>(discrete<span class="op">=</span>(mean<span class="op">=</span><span class="fu">mean</span>(runs.u), sd<span class="op">=</span><span class="fu">std</span>(runs.u)), continuous<span class="op">=</span>(mean<span class="op">=</span><span class="fu">mean</span>(cruns.u), sd<span class="op">=</span><span class="fu">std</span>(cruns.u)))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-display" data-execution_count="1">
+<pre><code>(discrete = (mean = 0.320546875, sd = 0.07415514734260763), continuous = (mean = 0.32021484375000003, sd = 0.0937972215975616))</code></pre>
+</div>
+</div>
+<p>The two agree closely, with a mean of about 0.32 of the plants infected at day 60 in both: the daily probabilities of root contact and of symptoms are small, so a day is a small step for them, and the aphids act once a day in both.</p>
+</section>
 <section id="choosing-a-backend" class="level2">
 <h2 class="anchored" data-anchor-id="choosing-a-backend">Choosing a backend</h2>
 <p>Without mobile agents every agent backend gives exactly the result of <code>ArrayBackend</code>, because they all sweep the same array engine. What differs is where the state is kept between steps, and so the overhead. Here are 50 steps of Life on a 200 × 200 torus:</p>
-<div id="26" class="cell" data-execution_count="1">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Agents</span>: Agents</span>
-<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>life <span class="op">=</span> <span class="fu">CAProblem</span>(<span class="fu">Life</span>(), <span class="fu">rand</span>(<span class="fu">Xoshiro</span>(<span class="fl">1</span>), <span class="dt">Int8</span>[<span class="fl">0</span>, <span class="fl">1</span>], <span class="fl">200</span>, <span class="fl">200</span>), <span class="fl">50</span>)</span>
-<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>backends <span class="op">=</span> [<span class="fu">ArrayBackend</span>(), <span class="fu">AgentsBackend</span>(<span class="op">:</span>grid), <span class="fu">AgentsBackend</span>(<span class="op">:</span>cells),</span>
-<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>            <span class="fu">ArkBackend</span>(<span class="op">:</span>grid), <span class="fu">ArkBackend</span>(<span class="op">:</span>cells)]</span>
-<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>labels <span class="op">=</span> [<span class="st">&quot;ArrayBackend()&quot;</span>, <span class="st">&quot;AgentsBackend(:grid)&quot;</span>, <span class="st">&quot;AgentsBackend(:cells)&quot;</span>,</span>
-<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>          <span class="st">&quot;ArkBackend(:grid)&quot;</span>, <span class="st">&quot;ArkBackend(:cells)&quot;</span>]</span>
-<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>reference <span class="op">=</span> <span class="fu">final_state</span>(<span class="fu">solve</span>(life; save_everystep<span class="op">=</span><span class="cn">false</span>))</span>
-<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a><span class="fu">all</span>(b <span class="op">-&gt;</span> <span class="fu">final_state</span>(<span class="fu">solve</span>(life; backend<span class="op">=</span>b, save_everystep<span class="op">=</span><span class="cn">false</span>)) <span class="op">==</span> reference, backends)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div id="28" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Agents</span>: Agents</span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>life <span class="op">=</span> <span class="fu">CAProblem</span>(<span class="fu">Life</span>(), <span class="fu">rand</span>(<span class="fu">Xoshiro</span>(<span class="fl">1</span>), <span class="dt">Int8</span>[<span class="fl">0</span>, <span class="fl">1</span>], <span class="fl">200</span>, <span class="fl">200</span>), <span class="fl">50</span>)</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>backends <span class="op">=</span> [<span class="fu">ArrayBackend</span>(), <span class="fu">AgentsBackend</span>(<span class="op">:</span>grid), <span class="fu">AgentsBackend</span>(<span class="op">:</span>cells),</span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>            <span class="fu">ArkBackend</span>(<span class="op">:</span>grid), <span class="fu">ArkBackend</span>(<span class="op">:</span>cells)]</span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>labels <span class="op">=</span> [<span class="st">&quot;ArrayBackend()&quot;</span>, <span class="st">&quot;AgentsBackend(:grid)&quot;</span>, <span class="st">&quot;AgentsBackend(:cells)&quot;</span>,</span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>          <span class="st">&quot;ArkBackend(:grid)&quot;</span>, <span class="st">&quot;ArkBackend(:cells)&quot;</span>]</span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a>reference <span class="op">=</span> <span class="fu">final_state</span>(<span class="fu">solve</span>(life; save_everystep<span class="op">=</span><span class="cn">false</span>))</span>
+<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a><span class="fu">all</span>(b <span class="op">-&gt;</span> <span class="fu">final_state</span>(<span class="fu">solve</span>(life; backend<span class="op">=</span>b, save_everystep<span class="op">=</span><span class="cn">false</span>)) <span class="op">==</span> reference, backends)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-display" data-execution_count="1">
 <pre><code>true</code></pre>
 </div>
 </div>
-<div id="28" class="cell" data-execution_count="1">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ms_per_step</span>(b) <span class="op">=</span> <span class="fl">1000</span> <span class="op">*</span> <span class="fu">minimum</span>(<span class="pp">@elapsed</span>(<span class="fu">solve</span>(life; backend<span class="op">=</span>b, save_everystep<span class="op">=</span><span class="cn">false</span>))</span>
-<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>                                <span class="cf">for</span> _ <span class="kw">in</span> <span class="fl">1</span><span class="op">:</span><span class="fl">3</span>) <span class="op">/</span> <span class="fl">50</span></span>
-<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>[label <span class="op">=&gt;</span> <span class="fu">round</span>(<span class="fu">ms_per_step</span>(b); digits<span class="op">=</span><span class="fl">3</span>) for (label, b) <span class="kw">in</span> <span class="fu">zip</span>(labels, backends)]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div id="30" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb24"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ms_per_step</span>(b) <span class="op">=</span> <span class="fl">1000</span> <span class="op">*</span> <span class="fu">minimum</span>(<span class="pp">@elapsed</span>(<span class="fu">solve</span>(life; backend<span class="op">=</span>b, save_everystep<span class="op">=</span><span class="cn">false</span>))</span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>                                <span class="cf">for</span> _ <span class="kw">in</span> <span class="fl">1</span><span class="op">:</span><span class="fl">3</span>) <span class="op">/</span> <span class="fl">50</span></span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>[label <span class="op">=&gt;</span> <span class="fu">round</span>(<span class="fu">ms_per_step</span>(b); digits<span class="op">=</span><span class="fl">3</span>) for (label, b) <span class="kw">in</span> <span class="fu">zip</span>(labels, backends)]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-display" data-execution_count="1">
 <pre><code>5-element Vector{Pair{String, Float64}}:
-        &quot;ArrayBackend()&quot; =&gt; 0.156
-  &quot;AgentsBackend(:grid)&quot; =&gt; 0.164
- &quot;AgentsBackend(:cells)&quot; =&gt; 0.468
-     &quot;ArkBackend(:grid)&quot; =&gt; 0.155
-    &quot;ArkBackend(:cells)&quot; =&gt; 0.307</code></pre>
+        &quot;ArrayBackend()&quot; =&gt; 0.142
+  &quot;AgentsBackend(:grid)&quot; =&gt; 0.152
+ &quot;AgentsBackend(:cells)&quot; =&gt; 0.489
+     &quot;ArkBackend(:grid)&quot; =&gt; 0.132
+    &quot;ArkBackend(:cells)&quot; =&gt; 0.296</code></pre>
 </div>
 </div>
 <p>In <code>:grid</code> mode the agent backends cost nothing over <code>ArrayBackend</code>. In <code>:cells</code> mode each step also gathers the cells into an array and scatters them back, which for a rule as cheap as Life costs several times the sweep itself; for a rule that does more work per cell the difference shrinks. Use <code>:cells</code> when the cells themselves need to be agents or entities: to give them components, query them alongside other entities, or use Agents.jl’s tools on them.</p>

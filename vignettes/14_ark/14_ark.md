@@ -5,6 +5,7 @@ Simon Frost
 - [The crop](#the-crop)
 - [Aphids as entities](#aphids-as-entities)
 - [One entity per plant](#one-entity-per-plant)
+- [In continuous time](#in-continuous-time)
 - [Choosing a backend](#choosing-a-backend)
 
 ## Overview
@@ -267,6 +268,37 @@ plant in six is healthy, against one in twenty untreated. With aphids
 flying in all season, the virus reaches healthy plants faster than
 weekly scouting can find the sick ones.
 
+## In continuous time
+
+The crop can also be written as rates and simulated event by event with
+`Gillespie()`, the aphids still flying once a day. With an agent backend
+the run stops at every whole day for the mobile agents, whose `update!`
+sees the day as an integer, exactly as after each step in discrete time.
+Here a plant is infected by each symptomatic neighbour at the rate that
+gives the daily probability `ε`, and becomes symptomatic at the rate
+that gives `1/τ` a day:
+
+``` julia
+crop_rates = EventRule(VonNeumann(1)) do cell, nbrs, ctx
+    cell == 0 && return (-log(1 - ctx.p.ε) * count(==(2), nbrs) => Int8(1),)
+    cell == 1 && return (-log(1 - 1 / ctx.p.τ) => Int8(2),)
+    return ()
+end
+continuous = EnsembleProblem(CAProblem(crop_rates, u0, 60.0, p; seed=1);
+                             output_func=(s, ctx) -> (count(>(0), final_state(s)) / n^2,
+                                                      false))
+cruns = solve(continuous, Gillespie(), EnsembleThreads(); trajectories=40, backend,
+              save_everystep=false)
+(discrete=(mean=mean(runs.u), sd=std(runs.u)), continuous=(mean=mean(cruns.u), sd=std(cruns.u)))
+```
+
+    (discrete = (mean = 0.320546875, sd = 0.07415514734260763), continuous = (mean = 0.32021484375000003, sd = 0.0937972215975616))
+
+The two agree closely, with a mean of about 0.32 of the plants infected
+at day 60 in both: the daily probabilities of root contact and of
+symptoms are small, so a day is a small step for them, and the aphids
+act once a day in both.
+
 ## Choosing a backend
 
 Without mobile agents every agent backend gives exactly the result of
@@ -294,11 +326,11 @@ ms_per_step(b) = 1000 * minimum(@elapsed(solve(life; backend=b, save_everystep=f
 ```
 
     5-element Vector{Pair{String, Float64}}:
-            "ArrayBackend()" => 0.16
-      "AgentsBackend(:grid)" => 0.159
-     "AgentsBackend(:cells)" => 0.447
-         "ArkBackend(:grid)" => 0.17
-        "ArkBackend(:cells)" => 0.339
+            "ArrayBackend()" => 0.118
+      "AgentsBackend(:grid)" => 0.091
+     "AgentsBackend(:cells)" => 0.492
+         "ArkBackend(:grid)" => 0.148
+        "ArkBackend(:cells)" => 0.298
 
 In `:grid` mode the agent backends cost nothing over `ArrayBackend`. In
 `:cells` mode each step also gathers the cells into an array and

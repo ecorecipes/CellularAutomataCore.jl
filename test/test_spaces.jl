@@ -107,5 +107,19 @@ const CAC = CellularAutomataCore
         I = CartesianIndex(2, 3)
         @test write_then_read(u, I) == (a=Int8(1), b=true, c=Int16(3))
         @test (@allocated write_then_read(u, I)) == 0
+        # `map` over many layers of different element types is not inferred and allocated per read.
+        many = (a=zeros(Int8, 4, 4), b=zeros(Int16, 4, 4), c=zeros(UInt32, 4, 4),
+                d=collect(falses(4, 4)), e=zeros(4, 4), f=zeros(Int8, 4, 4),
+                g=zeros(Int16, 4, 4), h=zeros(UInt32, 4, 4), i=zeros(Int8, 4, 4))
+        many.e[I] = 2.5
+        read_e(u, I) = CellularAutomataCore._read(u, I).e
+        @test read_e(many, I) == 2.5
+        @test (@allocated read_e(many, I)) == 0
+        # nor does a Margolus step of a block rule on such a state
+        r = BlockRule((b, ctx) -> (b[3], b[1], b[4], b[2]))
+        integ = init(CAProblem(r, many, 10), Margolus(); save_everystep=false)
+        step!(integ)
+        step!(integ)
+        @test (@allocated step!(integ)) == 0
     end
 end

@@ -4,7 +4,14 @@
 const LayeredState = NamedTuple{<:Any,<:Tuple{Vararg{AbstractArray}}}
 
 @inline _read(u::AbstractArray, I) = @inbounds u[I]
-@inline _read(u::LayeredState, I) = map(a -> (@inbounds a[I]), u)
+@inline function _read(u::LayeredState, I)
+    return NamedTuple{keys(u)}(_read_layers(values(u), I))
+end
+# Unrolled over the layers: `map` over a long tuple of arrays of different element types is not
+# inferred and allocates on every cell.
+@inline _read_layers(::Tuple{}, I) = ()
+@inline _read_layers(as::Tuple, I) = ((@inbounds first(as)[I]),
+                                      _read_layers(Base.tail(as), I)...)
 
 @inline _write!(u::AbstractArray, I, v) = (@inbounds u[I] = v; nothing)
 @inline function _write!(u::LayeredState, I, v::NamedTuple)

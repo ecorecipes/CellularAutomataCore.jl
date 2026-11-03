@@ -341,8 +341,12 @@ end
 function _advance_plain!(st::_PlainState, prob, ::Margolus, params, t)
     _reference_fields!(st, prob)
     env = _env(prob, params, st.fieldvals)
-    u = st.cur
-    n1, n2 = size(prob.space)
+    _margolus_sweep!(st.cur, prob.rule.f, env, size(prob.space), t)
+    return nothing
+end
+
+# The block loop, behind a function barrier so that it compiles for the concrete state and rule types.
+function _margolus_sweep!(u, f::F, env, (n1, n2), t) where {F}
     lin = LinearIndices((n1, n2))
     off = isodd(t) ? 1 : 0
     for bj in 0:(n2 ÷ 2 - 1), bi in 0:(n1 ÷ 2 - 1)
@@ -350,10 +354,13 @@ function _advance_plain!(st::_PlainState, prob, ::Margolus, params, t)
         i2, j2 = mod1(i1 + 1, n1), mod1(j1 + 1, n2)
         idx = (CartesianIndex(i1, j1), CartesianIndex(i2, j1), CartesianIndex(i1, j2),
                CartesianIndex(i2, j2))
-        any(I -> _masked(env.mask, I), idx) && continue
-        block = map(I -> _read(u, I), idx)
-        new = prob.rule.f(block, _context(env, idx[1], t, lin[idx[1]]))
-        foreach((I, v) -> _write!(u, I, _convert_cell(u, v)), idx, new)
+        (_masked(env.mask, idx[1]) || _masked(env.mask, idx[2]) ||
+         _masked(env.mask, idx[3]) || _masked(env.mask, idx[4])) && continue
+        block = (_read(u, idx[1]), _read(u, idx[2]), _read(u, idx[3]), _read(u, idx[4]))
+        new = f(block, _context(env, idx[1], t, lin[idx[1]]))
+        for k in 1:4                                   # unrolled by the compiler: a 4-tuple
+            _write!(u, idx[k], _convert_cell(u, new[k]))
+        end
     end
     return nothing
 end

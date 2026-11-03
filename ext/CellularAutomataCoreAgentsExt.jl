@@ -3,7 +3,7 @@
 # state is the model itself.
 module CellularAutomataCoreAgentsExt
 
-using Agents: Agents, AbstractAgent, GridSpace, StandardABM, abmproperties, abmrng,
+using Agents: Agents, AbstractAgent, GridSpace, Graphs, StandardABM, abmproperties, abmrng,
               add_agent!,
               allids, dummystep, remove_agent!
 using CellularAutomataCore
@@ -21,13 +21,25 @@ mutable struct LatticeCell{D,S} <: AbstractAgent
 end
 mutable struct GraphCell{S} <: AbstractAgent
     const id::Int
+    pos::Int
     state::S
 end
 _cell_agent(::Lattice{D}, S) where {D} = LatticeCell{D,S}
 _cell_agent(::GraphSpace, S) = GraphCell{S}
 
 _abm_space(s::Lattice) = GridSpace(s.dims; periodic=map(b -> b isa Periodic, s.boundaries))
-_abm_space(::GraphSpace) = nothing
+# The graph the cells read along: undirected when every neighbour list is mirrored, otherwise
+# directed with an edge i -> j when cell i reads cell j.
+function _abm_space(s::CAC.GraphSpace)
+    ns = s.neighbours
+    n = length(ns)
+    symmetric = all(i -> all(j -> i in ns[j], ns[i]), 1:n)
+    g = symmetric ? Graphs.SimpleGraph(n) : Graphs.SimpleDiGraph(n)
+    for i in 1:n, j in ns[i]
+        Graphs.add_edge!(g, i, j)
+    end
+    return Agents.GraphSpace(g)
+end
 
 # The model's properties. `cells` holds the cell agents by linear index in :cells mode and is
 # `nothing` in :grid mode, where `work` is the state of record.
@@ -78,7 +90,7 @@ function CAC.allocate_state(b::AgentsBackend, prob::CAProblem, scheme::AbstractS
 end
 
 _add_cell!(model, C::Type{<:LatticeCell}, I, v) = add_agent!(Tuple(I), C, model, v)
-_add_cell!(model, C::Type{<:GraphCell}, i, v) = add_agent!(C, model, v)
+_add_cell!(model, C::Type{<:GraphCell}, i, v) = add_agent!(i, C, model, v)
 
 # Copy the cell agents into the working state, and back.
 function _gather!(props::CAProperties)

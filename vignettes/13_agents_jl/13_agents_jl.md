@@ -8,6 +8,7 @@ Simon Frost
 - [One agent per plant](#one-agent-per-plant)
 - [Insecticide from a callback](#insecticide-from-a-callback)
 - [Ensembles](#ensembles)
+- [Agents on a network](#agents-on-a-network)
 
 ## Overview
 
@@ -36,7 +37,8 @@ using Statistics
 
 Both packages export a `GraphSpace`, so with both loaded it has to be
 written qualified, as `CellularAutomataCore.GraphSpace` or
-`Agents.GraphSpace`. This vignette uses neither.
+`Agents.GraphSpace`. The last section builds the first; `AgentsBackend`
+builds the second from it.
 
 ## The crop
 
@@ -219,7 +221,7 @@ solve(prob; backend=aphids); solve(prob; backend=plants)
 (grid=(@elapsed solve(prob; backend=aphids)), cells=(@elapsed solve(prob; backend=plants)))
 ```
 
-    (grid = 0.034004083, cells = 0.036793833)
+    (grid = 0.026756834, cells = 0.045602375)
 
 ## Insecticide from a callback
 
@@ -267,3 +269,97 @@ histogram!(treated.u; bins=0:0.025:0.6, alpha=0.6, label="sprayed on day 30")
 ```
 
 ![](13_agents_jl_files/figure-commonmark/cell-13-output-1.svg)
+
+## Agents on a network
+
+Not every landscape is a grid. Here forty fields are joined by roads, a
+`CellularAutomataCore.GraphSpace` in which each field reads the fields
+it has a road to. A blight spreads slowly between neighbouring fields,
+and traders drive from field to field once a day. A trader who stops at
+a blighted field carries it to the next field it visits, infecting it
+with probability one half.
+
+``` julia
+nfields = 40
+place = Xoshiro(7)
+xy = [(rand(place), rand(place)) for _ in 1:nfields]
+roads = [(i, j) for i in 1:nfields for j in (i + 1):nfields
+         if hypot((xy[i] .- xy[j])...) < 0.25]
+network = CellularAutomataCore.GraphSpace(nfields, roads)
+
+blight = LocalRule(GraphNeighbours()) do cell, nbrs, ctx
+    cell == 1 && return Int8(1)
+    k = count(==(1), nbrs)
+    return bernoulli(ctx, 1 - (1 - ctx.p.spread)^k) ? Int8(1) : Int8(0)
+end
+```
+
+    LocalRule(<anonymous function>, GraphNeighbours())
+
+With a graph, `AgentsBackend` gives the model an `Agents.GraphSpace` of
+the same network, so the traders are `GraphAgent`s whose position is a
+field, and they move along the roads with `nearby_positions` and
+`move_agent!`:
+
+``` julia
+@agent struct Trader(GraphAgent)
+    carrying::Bool
+end
+
+function trade!(trader, model)
+    rng = abmrng(model)
+    next = collect(nearby_positions(trader, model))
+    isempty(next) || move_agent!(trader, rand(rng, next), model)
+    field = read_cell(model, trader.pos)
+    if trader.carrying && field == 0 && rand(rng) < model.p.transmit
+        write_cell!(model, trader.pos, 1)
+    end
+    trader.carrying = field == 1
+end
+
+traders = AgentsBackend(:grid; agent_type=Trader,
+                        init! =m -> foreach(_ -> add_agent!(rand(abmrng(m), 1:nfields),
+                                                            Trader, m, false), 1:3),
+                        agent_step! =trade!)
+start = zeros(Int8, nfields)
+start[1] = 1
+season = CAProblem(blight, start, 30, (spread=0.02, transmit=0.5); space=network, seed=1)
+```
+
+    CAProblem(LocalRule(<anonymous function>, GraphNeighbours()) on GraphSpace(40 cells), tspan=(0, 30))
+
+``` julia
+function draw(u; title)
+    p = plot(; title, legend=false, aspect_ratio=1, ticks=false, framestyle=:box)
+    for (i, j) in roads
+        plot!(p, [xy[i][1], xy[j][1]], [xy[i][2], xy[j][2]]; c=:grey70)
+    end
+    scatter!(p, first.(xy), last.(xy); ms=6, c=[v == 1 ? :darkred : :palegreen for v in u])
+    return p
+end
+alone = final_state(solve(season))
+traded = final_state(solve(season; backend=traders))
+plot(draw(alone; title="blight alone"), draw(traded; title="with three traders");
+     layout=(1, 2), size=(800, 400))
+```
+
+![](13_agents_jl_files/figure-commonmark/cell-16-output-1.svg)
+
+Over 40 seasons each, the fraction of fields blighted at day 30:
+
+``` julia
+blighted = (s, ctx) -> (count(==(1), final_state(s)) / nfields, false)
+seasons = EnsembleProblem(season; output_func=blighted)
+without = solve(seasons, Synchronous(), EnsembleThreads(); trajectories=40,
+                save_everystep=false)
+with = solve(seasons, Synchronous(), EnsembleThreads(); trajectories=40, backend=traders,
+             save_everystep=false)
+(without=(mean=mean(without.u), sd=std(without.u)), with=(mean=mean(with.u), sd=std(with.u)))
+```
+
+    (without = (mean = 0.12187499999999998, sd = 0.06409815689977925), with = (mean = 0.158125, sd = 0.07933770323021806))
+
+Three traders raise the mean from about 0.12 to 0.16 of the fields. They
+travel only along roads, so, like the blight itself, they never reach
+the fields in the parts of the network that no road joins to the first
+blighted field.

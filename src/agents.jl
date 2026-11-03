@@ -26,15 +26,21 @@ Keep the state in an Agents.jl model (`StandardABM`), so that mobile agents can
 read and change the cells. Needs `using Agents`.
 
 - `mode = :grid`: the state is an array in the model's properties.
-- `mode = :cells`: every cell is an agent with fields `id`, `pos` (on a
-  lattice) and `state`; the agent with id `i` is the cell with linear index `i`,
-  so `model[i].state` is its state. Mobile agents get ids after the cells.
+- `mode = :cells`: every cell is an agent with fields `id`, `pos` and
+  `state`; the agent with id `i` is the cell with linear index `i` (vertex `i`
+  on a graph, where its `pos` is `i`), so `model[i].state` is its state.
+  Mobile agents get ids after the cells.
   The cell agents occupy every position, so Agents.jl functions that look for
   empty positions find none (pass `ifempty=false` to `randomwalk!`), and
   `nearby_agents` returns cells as well as mobile agents.
 
 The model's space is a `GridSpace` of the lattice's size, periodic along the
-axes whose boundary is [`Periodic`](@ref) (no space on a [`GraphSpace`](@ref)).
+axes whose boundary is [`Periodic`](@ref), or, on a [`GraphSpace`](@ref), an
+Agents.jl `GraphSpace` of the same graph: undirected when every neighbour list
+is mirrored (as for undirected edges), otherwise directed with an edge
+`i → j` when cell `i` reads cell `j`. Mobile agents on it are `GraphAgent`s
+whose `pos` is a vertex; they move with `move_agent!` to a vertex from
+`nearby_positions`.
 Its properties give the parameters as `model.p` and the time as `model.t`, and
 `abmrng(model)` is seeded from the problem's seed.
 

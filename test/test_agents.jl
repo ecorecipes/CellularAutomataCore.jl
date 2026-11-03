@@ -12,6 +12,12 @@ Sprayer(; id, pos) = Sprayer(id, pos)
 struct Walker
     pos::NTuple{2,Int}
 end
+# a mobile agent on a graph: its position is a vertex
+mutable struct GraphWalker <: Agents.AbstractAgent
+    const id::Int
+    pos::Int
+end
+GraphWalker(; id, pos) = GraphWalker(id, pos)
 
 const MOVES = ((1, 0), (-1, 0), (0, 1), (0, -1))
 walk(pos, rng, dims) = mod1.(pos .+ MOVES[rand(rng, 1:4)], dims)
@@ -190,6 +196,53 @@ count_walkers(w) = Ark.count_entities(Ark.Query(w, (Walker,)))
         reinit!(integ)
         solve!(integ)
         @test integ.sol_u == first_run == sols[1].u
+    end
+
+    @testset "graphs" begin
+        # mobile agents on a graph CA walk along its edges, in an Agents.jl GraphSpace
+        ring = GraphSpace(30, [(i, mod1(i + k, 30)) for i in 1:30 for k in (1, 7)])
+        gsis = LocalRule(GraphNeighbours()) do c, n, ctx
+            c == 1 && return bernoulli(ctx, ctx.p.γ) ? Int8(0) : Int8(1)
+            return bernoulli(ctx, 1 - (1 - ctx.p.β)^count(==(1), n)) ? Int8(1) : Int8(0)
+        end
+        g0 = zeros(Int8, 30)
+        g0[1:4] .= 1
+        gprob = CAProblem(gsis, g0, 40, (β=0.3, γ=0.1); space=ring, seed=3)
+        moves = Dict{Symbol,Vector{Tuple{Int,Int}}}()
+        walkers(mode) = AgentsBackend(mode; agent_type=GraphWalker,
+                                      (init!)=m -> foreach(v -> Agents.add_agent!(v,
+                                                                                  GraphWalker,
+                                                                                  m),
+                                                           (1, 10, 20)),
+                                      (agent_step!)=(a, m) -> begin
+                                          from = a.pos
+                                          to = rand(Agents.abmrng(m),
+                                                    collect(Agents.nearby_positions(a, m)))
+                                          Agents.move_agent!(a, to, m)
+                                          push!(get!(moves, mode, Tuple{Int,Int}[]),
+                                                (from, to))
+                                          spray!(m, to)
+                                      end)
+        plain_g = solve(gprob)
+        @test solve(gprob; backend=AgentsBackend(:grid)).u == plain_g.u
+        @test solve(gprob; backend=AgentsBackend(:cells)).u == plain_g.u
+        a = solve(gprob; backend=walkers(:grid))
+        b = solve(gprob; backend=walkers(:cells))
+        @test a.u == b.u && a.u != plain_g.u
+        @test moves[:grid] == moves[:cells] && length(moves[:grid]) == 3 * 40
+        @test all(((i, j),) -> j in ring.neighbours[i], moves[:grid])
+        integ = init(gprob; backend=walkers(:cells))
+        m = agent_model(integ)
+        @test all(i -> m[i].pos == i && m[i].state == g0[i], 1:30)
+        @test sort([m[id].pos for id in 31:33]) == [1, 10, 20]
+        @test !Agents.Graphs.is_directed(Agents.abmspace(m).graph)
+        # one-way neighbour lists give a directed graph, with an edge i -> j when i reads j
+        oneway = GraphSpace(5, [(i, mod1(i + 1, 5)) for i in 1:5]; directed=true)
+        dm = agent_model(init(CAProblem(gsis, zeros(Int8, 5), 2, (β=0.3, γ=0.1);
+                                        space=oneway); backend=AgentsBackend(:grid)))
+        dg = Agents.abmspace(dm).graph
+        @test Agents.Graphs.is_directed(dg) && Agents.Graphs.has_edge(dg, 1, 2) &&
+              !Agents.Graphs.has_edge(dg, 2, 1)
     end
 
     @testset "ensembles" begin

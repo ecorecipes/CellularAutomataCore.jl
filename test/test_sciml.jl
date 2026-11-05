@@ -100,6 +100,11 @@
               callback=PeriodicCallback(i -> push!(hits, i.t), 20; initial_affect=true,
                                         phase=5))
         @test hits == [0, 25, 45]
+        # an initial affect changes the state the first step runs from, not only the saved copy
+        counting = CAProblem(LocalRule((c, nb, ctx) -> c + 1, VonNeumann(1)),
+                             zeros(Int, 3, 3), 2)
+        start = PeriodicCallback(i -> (i.u[1, 1]=10; nothing), 100; initial_affect=true)
+        @test [u[1, 1] for u in solve(counting; callback=start).u] == [10, 11, 12]
         @test_throws ArgumentError PeriodicCallback(identity, 0)
         @test_throws ArgumentError solve(prob; callback=1)
         # callbacks give the same result on every backend

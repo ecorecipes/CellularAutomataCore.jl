@@ -552,7 +552,12 @@ function PeriodicCallback(affect!, Δt::Real; initial_affect::Bool=false,
                 SciMLBase.add_tstop!(integ, t0 + phase + k * Δt)
             end
         end
-        initial_affect ? affect!(integ) : u_modified!(integ, false)
+        if initial_affect
+            u_modified!(integ, true)  # as around every other affect!, so the change is applied
+            affect!(integ)
+        else
+            u_modified!(integ, false)
+        end
         return nothing
     end
     return DiscreteCallback(condition, affect!; initialize, save_positions=(false, false))

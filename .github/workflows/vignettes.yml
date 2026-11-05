@@ -43,13 +43,22 @@ jobs:
           curl -sSL https://github.com/cormullion/juliamono/releases/latest/download/JuliaMono-ttf.tar.gz | tar -xz -C fonts/JuliaMono
       - name: Instantiate vignette environment
         run: julia --project=CellularAutomataCore.jl/vignettes -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
-          path: CellularAutomataCore.jl/vignettes/_freeze
-          key: freeze-${{ runner.os }}-${{ hashFiles('CellularAutomataCore.jl/vignettes/Manifest.toml', 'CellularAutomataCore.jl/vignettes/**/*.qmd') }}
+          # entries are named by what they depend on, so an old one can be reused safely
+          path: CellularAutomataCore.jl/vignettes/_exec_cache
+          key: vignette-exec-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: vignette-exec-${{ runner.os }}-
       - name: Render (html, gfm, pdf)
-        working-directory: CellularAutomataCore.jl/vignettes
-        run: quarto render
+        working-directory: CellularAutomataCore.jl
+        run: julia scripts/render_vignettes.jl
+      - uses: actions/cache/save@v4
+        # also after a failure: the script carries on past a failing vignette, and the
+        # others need not run again
+        if: always()
+        with:
+          path: CellularAutomataCore.jl/vignettes/_exec_cache
+          key: vignette-exec-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Report drift from the committed renders
         # Informational: a fresh render on this runner differs from the committed one in
         # timings, the last digits of some floats (x86 here, the renders are made locally)

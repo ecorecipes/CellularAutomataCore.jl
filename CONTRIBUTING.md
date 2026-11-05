@@ -30,8 +30,8 @@ julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
 1. Create `vignettes/NN_short_name/NN_short_name.qmd` with front matter including `engine: julia` and
    `pdf: default` under `format:` (copy an existing vignette's front matter).
 2. Add any new dependencies to `vignettes/Project.toml`.
-3. `cd vignettes && quarto render && quarto render --to gfm` renders HTML, GitHub-flavoured Markdown and PDF
-   (the second command restores `NN_short_name_files/`, which a multi-format render deletes) (the PDF needs
+3. `julia scripts/render_vignettes.jl` renders HTML, GitHub-flavoured Markdown and PDF
+   (the PDF needs
    `lualatex` and the JuliaMono font in `../fonts/JuliaMono/`; see `vignettes/README.md`). Commit the
    `.qmd`, the rendered `.md`, `.html` and `.pdf`, and `NN_short_name_files/`.
 4. `julia scripts/sync_vignettes.jl` and commit `docs/src/tutorials/`.

@@ -93,7 +93,7 @@ the `references.bib` files here are synced copies.
 ```sh
 julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'   # the test suite
 julia --project=docs docs/make.jl --no-deploy                     # build docs locally
-cd vignettes && quarto render && quarto render --to gfm         # render vignettes to html/gfm/pdf (julia engine; PDF needs lualatex + ../fonts/JuliaMono)
+julia scripts/render_vignettes.jl                                 # render out-of-date vignettes to html/gfm/pdf, running each one's code once (cached; PDF needs lualatex + ../fonts/JuliaMono)
 julia scripts/sync_vignettes.jl [--check]                         # copy vignettes into docs/src/tutorials
 ```
 

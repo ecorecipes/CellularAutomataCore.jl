@@ -58,5 +58,7 @@ format:
         \DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\},breaklines,breakanywhere,breaksymbolleft={},fontsize=\small}
         \RecustomVerbatimEnvironment{verbatim}{Verbatim}{breaklines,breakanywhere,breaksymbolleft={},fontsize=\small}
 
+# scripts/render_vignettes.jl runs each vignette once and caches the result itself, keyed on
+# what the vignette depends on, including package source, which freeze would not notice.
 execute:
-  freeze: auto
+  freeze: false

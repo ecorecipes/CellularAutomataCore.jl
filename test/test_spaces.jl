@@ -49,6 +49,61 @@ const CAC = CellularAutomataCore
         @test CAC._boundary_read(Torus(3, 3), L, CartesianIndex(0, 1)) == (a=1, b=2.0)
     end
 
+    @testset "a boundary value for each layer" begin
+        L = (a=fill(1, 3, 3), b=fill(2.0, 3, 3), c=fill(true, 3, 3))
+        off = CartesianIndex(0, 1)
+        read_at(v) = CAC._boundary_read(Grid(3, 3; boundary=Constant(v)), L, off)
+        # every layer named, in any order
+        @test read_at((a=-1, b=0.5, c=true)) === (a=-1, b=0.5, c=true)
+        @test read_at((c=true, b=0.5, a=-1)) === (a=-1, b=0.5, c=true)
+        # layers not named read zero, as under Constant(0), and values take the layer's type
+        @test read_at((; a=-1)) === (a=-1, b=0.0, c=false)
+        @test read_at((; b=1)) === (a=0, b=1.0, c=false)
+        @test read_at((;)) === read_at(0)
+        @test read_at(0) === (a=0, b=0.0, c=false)
+        # the read is on the hot path of every backend
+        g = Grid(3, 3; boundary=Constant((; a=-1)))
+        @test (@inferred CAC._boundary_read(g, L, off)) === (a=-1, b=0.0, c=false)
+        @test (@allocated CAC._boundary_read(g, L, off)) == 0
+        # different values on different axes, and in-range cells untouched
+        two = Grid(3, 3; boundary=(Constant((; a=-1)), Constant((; a=-2))))
+        @test CAC._boundary_read(two, L, CartesianIndex(0, 1)).a == -1
+        @test CAC._boundary_read(two, L, CartesianIndex(1, 0)).a == -2
+        @test CAC._boundary_read(two, L, CartesianIndex(1, 1)) == (a=1, b=2.0, c=true)
+    end
+
+    @testset "a boundary the state cannot hold is refused when the problem is built" begin
+        r = LocalRule((c, n, ctx) -> c, Moore(1))
+        L = (a=fill(1.0, 3, 3), b=fill(true, 3, 3))
+        make(v, u=L) = CAProblem(r, u, 1; space=Grid(3, 3; boundary=Constant(v)))
+        # the case that motivates naming layers: -1 fills every layer, and a Bool cannot hold it
+        @test_throws IncompatibleSpaceError make(-1)
+        @test_throws "name the layers" make(-1)
+        @test make(1) isa CAProblem
+        @test make((; a=-1)) isa CAProblem
+        @test solve(make((; a=-1))).u[end] == L
+        # a misspelt layer would otherwise be ignored
+        @test_throws IncompatibleSpaceError make((a=-1, depth=2))
+        @test_throws ":depth" make((a=-1, depth=2))
+        @test_throws IncompatibleSpaceError make((; b=-1))
+        @test_throws "layer :b" make((; b=-1))
+        # a state without layers
+        @test_throws IncompatibleSpaceError make((; a=1), fill(1, 3, 3))
+        @test_throws IncompatibleSpaceError make(0.5, fill(1, 3, 3))
+        @test make(1, fill(1, 3, 3)) isa CAProblem
+        # the check also covers a new space given to remake, on any axis
+        p = make(0)
+        @test_throws IncompatibleSpaceError remake(p;
+                                                   space=Grid(3, 3; boundary=Constant(-1)))
+        @test_throws IncompatibleSpaceError CAProblem(r, L, 1;
+                                                      space=Grid(3, 3;
+                                                                 boundary=(Periodic(),
+                                                                           Constant(-1))))
+        # values that are not numbers are not checked here: a rule may never read them
+        @test make(0, fill((1, 2), 3, 3)) isa CAProblem
+        @test CAProblem(r, L, 1; space=Torus(3, 3)) isa CAProblem
+    end
+
     @testset "neighbourhoods" begin
         n(nb, s) = length(neighbourhood_offsets(nb, s))
         @test n(Moore(1), Torus(5, 5)) == 8

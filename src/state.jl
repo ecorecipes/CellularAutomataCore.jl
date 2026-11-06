@@ -47,6 +47,61 @@ function _check_shape(u::LayeredState, space)
     return nothing
 end
 
+# A Constant boundary is read mid-run, so a value the state cannot hold is caught when the problem
+# is built. Only numbers are checked: a rule that reads no neighbours may never read the boundary of
+# a state of tuples or symbols, whose default Constant(0) must stay legal.
+_check_boundaries(u, space) = nothing
+function _check_boundaries(u, space::Lattice)
+    foreach(b -> _check_boundary(u, b, space), boundaries(space))
+    return nothing
+end
+_check_boundary(u, ::AbstractBoundary, space) = nothing
+_check_boundary(u, b::Constant, space) = _check_fill(u, b.value, space)
+
+_holds(T, x) = true
+function _holds(::Type{T}, x::Number) where {T<:Number}
+    try
+        convert(T, x)
+        return true
+    catch e
+        e isa InexactError || rethrow()
+        return false
+    end
+end
+
+function _boundary_mismatch(v, space, msg)
+    return IncompatibleSpaceError("the boundary Constant($(repr(v)))", _describe(space),
+                                  msg)
+end
+
+function _check_fill(u::AbstractArray, v, space)
+    v isa NamedTuple &&
+        throw(_boundary_mismatch(v, space, "it names layers, and the state has none"))
+    _holds(eltype(u), v) ||
+        throw(_boundary_mismatch(v, space, "a state of $(eltype(u)) cannot hold it"))
+    return nothing
+end
+function _check_fill(u::LayeredState, v::NamedTuple, space)
+    unknown = Tuple(k for k in keys(v) if !haskey(u, k))
+    isempty(unknown) ||
+        throw(_boundary_mismatch(v, space,
+                                 "the state has no layer $(join(map(repr, unknown), ", ")); its layers are $(keys(u))"))
+    for (k, x) in pairs(v)
+        _holds(eltype(u[k]), x) ||
+            throw(_boundary_mismatch(v, space,
+                                     "layer $(repr(k)) of $(eltype(u[k])) cannot hold $x"))
+    end
+    return nothing
+end
+function _check_fill(u::LayeredState, v, space)
+    for (k, a) in pairs(u)
+        _holds(eltype(a), v) ||
+            throw(_boundary_mismatch(v, space,
+                                     "a number fills every layer, and layer $(repr(k)) of $(eltype(a)) cannot hold it; name the layers to give them their own values, as in Constant((; $(k)=...))"))
+    end
+    return nothing
+end
+
 _copy_state(u::AbstractArray) = copy(u)
 _copy_state(u::LayeredState) = map(copy, u)
 

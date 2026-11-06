@@ -30,6 +30,12 @@ struct Reflecting <: AbstractBoundary end
 Every cell beyond the edge holds `value`, for example `Constant(0)` for a dead
 or empty margin. When cells lie beyond the edges of several `Constant` axes at
 once, the value of the highest-numbered of those axes is used.
+
+A number fills every layer of a layered state, so it must suit them all:
+`Constant(-1)` cannot fill a layer of `Bool`. A `NamedTuple` gives layers their
+own values and the layers it does not name read zero, so `Constant((; depth=-1.0))`
+marks the edge in one layer whatever the others hold. Naming a layer the state
+does not have is an [`IncompatibleSpaceError`](@ref) when the problem is built.
 """
 struct Constant{T} <: AbstractBoundary
     value::T

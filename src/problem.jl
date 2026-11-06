@@ -76,6 +76,7 @@ function CAProblem(rule::AbstractRule, u0, tspan, p=NullParameters(); space=noth
     ts isa Tuple{Int,Int} || rule isa EventRule ||
         throw(ArgumentError("a real-valued tspan $ts needs an EventRule; other rules advance in whole steps"))
     _check_shape(u0, space)
+    _check_boundaries(u0, space)
     neighbours = _resolve(neighbourhood(rule), space)
     validate_state(rule, u0)
     _check_covariates(covariates, space)

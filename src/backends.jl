@@ -166,7 +166,10 @@ end
 
 # The value read beyond a Constant boundary, in the layout of the state.
 @inline _fill_value(u::AbstractArray, v) = convert(eltype(u), v)
-@inline _fill_value(u::LayeredState, v::NamedTuple) = _convert_cell(u, v)
+# Layers a NamedTuple does not name read zero, as under the default Constant(0).
+@inline _fill_value(u::LayeredState, v::NamedTuple) = _convert_cell(u,
+                                                                    merge(map(_ -> 0, u),
+                                                                          v))
 @inline _fill_value(u::LayeredState, v) = map(a -> convert(eltype(a), v), u)
 
 # Map an unpadded index that may lie outside the lattice. Returns (index, d) where d is the

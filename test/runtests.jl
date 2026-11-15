@@ -23,6 +23,8 @@ using KernelAbstractions: KernelAbstractions
     include("test_extras.jl")
     include("test_evaluation.jl")
     include("test_calibration.jl")
+    include("test_likelihood.jl")
+    include("test_observation.jl")
     include("test_rasters.jl")
     include("test_backend_interface.jl")
     include("backend_conformance.jl")

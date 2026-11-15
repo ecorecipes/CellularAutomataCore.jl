@@ -130,3 +130,21 @@ function Base.showerror(io::IO, e::UnsupportedCombinationError)
     return print(io, "UnsupportedCombinationError: backend ", e.backend,
                  " does not support the update scheme ", e.scheme)
 end
+
+"""
+    NoLikelihoodError(what, msg)
+
+Thrown when a likelihood is asked of a rule, update scheme or problem that does
+not define one, for example [`path_logpdf`](@ref) with a [`LocalRule`](@ref)
+(whose transition probabilities are unstated) or with
+[`RandomSequential`](@ref) (whose cells do not update independently). `what`
+names the offending object and `msg` says why.
+"""
+struct NoLikelihoodError <: CellularAutomataCoreError
+    what::String
+    msg::String
+end
+
+function Base.showerror(io::IO, e::NoLikelihoodError)
+    return print(io, "NoLikelihoodError: no likelihood for ", e.what, ": ", e.msg)
+end

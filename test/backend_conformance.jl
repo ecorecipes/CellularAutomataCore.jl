@@ -85,6 +85,20 @@ function conformance_cases()
     end
     field32 = (P=KernelField(AnisotropicKernel(GaussianKernel(1.5), 1.0, 1.0), ==(1);
                              precision=Float32),)
+    # rules given by their transition probabilities: one inversion draw per cell
+    sir_stated = ProbabilisticRule(VonNeumann(1)) do c, n, ctx
+        if c == Int8(0)
+            q = 1 - (1 - ctx.p.β)^count(==(Int8(1)), n)
+            return (Int8(0) => 1 - q, Int8(1) => q, Int8(2) => 0.0)
+        elseif c == Int8(1)
+            return (Int8(0) => 0.0, Int8(1) => 1 - ctx.p.γ, Int8(2) => ctx.p.γ)
+        end
+        return (Int8(0) => 0.0, Int8(1) => 0.0, Int8(2) => 1.0)
+    end
+    si32_stated = ProbabilisticRule() do c, n, ctx
+        q = c == Int8(1) ? 1.0f0 : 1.0f0 - exp(-ctx.p.β * field(ctx, :P))
+        return (Int8(0) => 1.0f0 - q, Int8(1) => q)
+    end
     orbium32 = place!(zeros(Float32, 40, 40), Float32.(ORBIUM), (10, 10))
     wolfram3 = Wolfram(7_000_000_001; states=3)
     return [Case("elementary rule 30 on a ring",
@@ -151,6 +165,11 @@ function conformance_cases()
                  alg=Stochastic(0.5f0), background=Int8(0)),
             Case("Float32 kernel field",
                  CAProblem(si32, si0, 12, (β=2.0f0,); seed=13, fields=field32)),
+            Case("stated probabilities, SIR",
+                 CAProblem(sir_stated, sir32_0, 25, (β=0.4, γ=0.2); seed=14);
+                 background=Int8(0)),
+            Case("stated Float32 probabilities, kernel field",
+                 CAProblem(si32_stated, si0, 12, (β=2.0f0,); seed=15, fields=field32)),
             Case("Float32 Lenia", CAProblem(Lenia(; precision=Float32), orbium32, 6))]
 end
 

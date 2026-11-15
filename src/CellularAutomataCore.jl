@@ -32,6 +32,10 @@ model gives the same result on every backend and thread count. Problems follow
 the SciML interface: `solve(CAProblem(rule, u0, tspan, p), alg; saveat,
 callback)`, with SciMLBase callbacks, `remake` and ensembles;
 [`abc_rejection`](@ref) calibrates a model against observations on an ensemble.
+A [`ProbabilisticRule`](@ref) states its transition probabilities, which give the
+exact likelihood of an observed path ([`path_logpdf`](@ref)); an
+[`Observation`](@ref) says what a sensor or survey reports of a state, through a
+[`Footprint`](@ref) from model cells to pixels or plots.
 
 This package depends on no category-theory library.
 `CategoricalCellularAutomata.jl` builds the categorical layer on top of it.
@@ -93,9 +97,16 @@ export state_counts, cluster_sizes, morans_i, hexagon_vertices
 export confusion_counts, cohens_kappa, auc, figure_of_merit
 # Calibration
 export abc_rejection, ABCResult
+# Likelihoods of observed paths
+export ProbabilisticRule, transition_probability, transition_logpdf, path_logpdf
+# Observation models
+export MapGrid, Footprint, footprint, coverage, aggregate
+export Observation, Detection, Misclassification, GaussianError
+export observation_logpdf, simulate_observation
 # Exceptions: the root and the concrete types under it
 export CellularAutomataCoreError, RuleParseError, RLEParseError, StateShapeError
 export InvalidStateError, IncompatibleSpaceError, UnsupportedCombinationError
+export NoLikelihoodError
 
 include("errors.jl")
 include("spaces.jl")
@@ -120,6 +131,8 @@ include("model.jl")
 include("measures.jl")
 include("evaluation.jl")
 include("calibration.jl")
+include("likelihood.jl")
+include("observation.jl")
 include("recipes.jl")
 
 end # module

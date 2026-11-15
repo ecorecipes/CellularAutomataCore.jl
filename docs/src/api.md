@@ -20,4 +20,5 @@ StateShapeError
 InvalidStateError
 IncompatibleSpaceError
 UnsupportedCombinationError
+NoLikelihoodError
 ```

@@ -188,8 +188,9 @@ interface of a SciML integrator:
   `u_modified!(integ, true)` after changing it.
 - `integ.t`: the current time; `integ.p`: the parameters, which may be
   reassigned (`integ.p = ...`) to change rates from the next step on.
-- `step!(integ)`, `step!(integ, n)`, `solve!(integ)`, `reinit!(integ)`,
-  `terminate!(integ)`. In continuous time ([`Gillespie`](@ref)) a step is one
+- `step!(integ)`, `step!(integ, n)`, `step!(integ, dt, stop_at_tdt)`,
+  `solve!(integ)`, `reinit!(integ)`, `terminate!(integ)`, `set_u!(integ, u)`,
+  `check_error(integ)`. In continuous time ([`Gillespie`](@ref)) a step is one
   event, or a stop at a time given to `add_tstop!`.
 """
 mutable struct CAIntegrator{Pr<:CAProblem,A<:AbstractScheme,B<:AbstractBackend,S,V,U,C,Pa,
@@ -255,6 +256,36 @@ end
 function SciMLBase.derivative_discontinuity!(integ::CAIntegrator, modified::Bool)
     return SciMLBase.u_modified!(integ, modified)
 end
+
+"""
+    set_u!(integ::CAIntegrator, u)
+
+Replace the integrator's state with a copy of `u` (same layout as `u0`, single-layer or
+layered), applied before the next step: SciML's way of applying a perturbation outside a
+callback, equivalent to assigning `integ.u` and calling `u_modified!(integ, true)`.
+"""
+function SciMLBase.set_u!(integ::CAIntegrator, u)
+    integ.u = _copy_state(u)
+    return nothing
+end
+
+"""
+    check_error(integ::CAIntegrator) -> ReturnCode.T
+
+The integrator's return code, `ReturnCode.Success` while it is running normally (SciML's
+convention for checking a stepping integrator), `ReturnCode.Terminated` after
+[`terminate!`](@ref).
+"""
+function SciMLBase.check_error(integ::CAIntegrator)
+    return integ.retcode == ReturnCode.Default ? ReturnCode.Success : integ.retcode
+end
+
+"""
+    successful_retcode(sol::CASolution) -> Bool
+
+Whether the run ended normally (`Success` or `Terminated`), as for a SciML solution.
+"""
+SciMLBase.successful_retcode(sol::CASolution) = SciMLBase.successful_retcode(sol.retcode)
 
 # Apply pending changes to integ.u to the backend. A copy that is not fresh is stale, not
 # modified (the backend changed after it was taken), and is never applied.
@@ -352,6 +383,8 @@ Set up a problem for stepping, with SciML's saving and callback keywords:
   checked in order after every step ([`PeriodicCallback`](@ref),
   [`PresetTimeCallback`](@ref) and [`SavingCallback`](@ref) build common ones).
 - `backend`: the [`AbstractBackend`](@ref).
+- `seed`: run with this seed instead of the problem's (`init(remake(prob; seed), alg)`),
+  as SciML's stochastic solvers accept it.
 
 Solver keywords stored in the problem apply unless given here; callbacks from
 both are combined, the problem's first.
@@ -359,7 +392,9 @@ both are combined, the problem's first.
 Raises [`UnsupportedCombinationError`](@ref) if the backend cannot run the
 scheme.
 """
-function CommonSolve.init(prob::CAProblem, alg::AbstractScheme=Synchronous(); kwargs...)
+function CommonSolve.init(prob::CAProblem, alg::AbstractScheme=Synchronous(); seed=nothing,
+                          kwargs...)
+    seed === nothing || (prob = remake(prob; seed=seed))
     stored = prob.kwargs
     if haskey(stored, :callback) && haskey(kwargs, :callback) &&
        kwargs[:callback] !== nothing
@@ -422,6 +457,31 @@ function CommonSolve.step!(integ::CAIntegrator, n::Integer=1)
         setfield!(integ, :_fresh, false)
         _apply_callbacks!(integ)
         (_should_save(integ) || integ.retcode == ReturnCode.Terminated) && _save!(integ)
+    end
+    return integ
+end
+
+"""
+    step!(integ::CAIntegrator, dt::Real, stop_at_tdt::Bool)
+
+SciML's timed step: advance until the time has increased by at least `dt`, or exactly `dt`
+if `stop_at_tdt` (a run that ends or is terminated earlier stops there). Discrete schemes
+take `dt` whole steps, so `dt` must be a whole number when `stop_at_tdt` is true; in
+continuous time ([`Gillespie`](@ref)) `stop_at_tdt` adds a stop at `t + dt`
+(`add_tstop!`) so that the run lands on it without an event.
+"""
+function CommonSolve.step!(integ::CAIntegrator, dt::Real, stop_at_tdt::Bool)
+    dt >= 0 || throw(ArgumentError("dt must be non-negative, got $dt"))
+    if _continuous(integ.alg)
+        target = Float64(integ.t + dt)
+        stop_at_tdt && SciMLBase.add_tstop!(integ, target)
+        while integ.t < target && !_finished(integ)
+            _event_step!(integ)
+        end
+    else
+        stop_at_tdt && !isinteger(dt) &&
+            throw(ArgumentError("$(integ.alg) advances in whole steps, so it cannot stop exactly after dt = $dt"))
+        step!(integ, ceil(Int, dt))
     end
     return integ
 end

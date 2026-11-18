@@ -147,3 +147,36 @@ function place!(u::AbstractArray{T,N}, pattern::AbstractArray{<:Any,N},
     end
     return u
 end
+
+"""
+    disturb!(u, rng; fraction, value=nothing, from=nothing) -> u
+
+Disturb a single-layer state in place, as a pulse perturbation for resilience experiments:
+each eligible cell is set to `value` independently with probability `fraction`. A cell is
+eligible if `from` is `nothing` (every cell), if it holds `from`, or, when `from` is a
+function, if `from(value_of_cell)` is true (`from = >(0)` for every occupied cell).
+`value` defaults to `zero(eltype(u))`; give it for states whose
+element type has no zero (for example `Symbol`s). One `rand(rng)` is drawn per eligible cell,
+in the state's linear order, so the same `rng` state gives the same disturbance; `rng` is any
+random number generator (for example `Xoshiro(1)` from Random). For a layered state, disturb
+one layer: `disturb!(u.layer, rng; ...)`.
+
+```julia
+using Random
+u = ones(Int8, 100, 100)
+disturb!(u, Xoshiro(1); fraction=0.3)   # clear about 30% of the occupied cells
+```
+"""
+function disturb!(u::AbstractArray, rng; fraction::Real, value=nothing, from=nothing)
+    0 <= fraction <= 1 || throw(ArgumentError("fraction must be in [0, 1], got $fraction"))
+    v = value === nothing ? zero(eltype(u)) : convert(eltype(u), value)
+    for i in eachindex(u)
+        _eligible(u[i], from) || continue
+        rand(rng) < fraction && (u[i] = v)
+    end
+    return u
+end
+
+_eligible(x, ::Nothing) = true
+_eligible(x, from::Function) = from(x)::Bool
+_eligible(x, from) = x == from

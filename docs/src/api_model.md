@@ -102,6 +102,7 @@ state_raster
 ```@docs
 single_seed
 place!
+disturb!
 parse_rle
 read_rle
 rle_string

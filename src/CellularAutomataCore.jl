@@ -61,7 +61,7 @@ export cells, boundaries, geometry
 export AbstractNeighbourhood, Moore, VonNeumann, Hexagonal, Offsets, GraphNeighbours
 export default_neighbourhood, neighbourhood_offsets
 # States and patterns
-export single_seed, place!, parse_rle, read_rle, rle_string, write_rle
+export single_seed, place!, disturb!, parse_rle, read_rle, rle_string, write_rle
 # Rules
 export AbstractRule, local_rule, neighbourhood, validate_state, LocalRule
 export Wolfram, Totalistic, Life, Generations, LIFE_PRESETS, GENERATIONS_PRESETS, rulestring

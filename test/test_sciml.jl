@@ -130,4 +130,93 @@
         s2 = solve(ep, Synchronous(), EnsembleSerial(); trajectories=3, seed=42, saveat=60)
         @test [final_state(s) for s in s1.u] == [final_state(s) for s in s2.u]
     end
+
+    # The parts of SciML's integrator interface that simulation-based resilience metrics
+    # (DynamicalResilience.jl) drive: timed steps, set_u!, check_error, a seed at init,
+    # exact replay with reinit!, successful_retcode on solutions.
+    @testset "integrator contract for simulation-based metrics" begin
+        SB = CellularAutomataCore.SciMLBase
+        integ = init(prob; save_everystep=false)
+        step!(integ, 7, true)
+        @test integ.t == 7
+        step!(integ, 2.5, false)                      # at least 2.5: three whole steps
+        @test integ.t == 10
+        @test_throws ArgumentError step!(integ, 2.5, true)
+        @test_throws ArgumentError step!(integ, -1, true)
+        @test SB.check_error(integ) == ReturnCode.Success
+        step!(integ, 1000, true)                      # stops at the end of tspan
+        @test integ.t == 60
+        terminate!(integ)
+        @test SB.check_error(integ) == ReturnCode.Terminated
+
+        # a seed given to init is remake(prob; seed)
+        a = init(prob; seed=9, save_everystep=false)
+        b = init(remake(prob; seed=9); save_everystep=false)
+        step!(a, 30, true)
+        step!(b, 30, true)
+        @test a.u == b.u && a.prob.seed == 9
+
+        # reinit! replays exactly, also after a pulse applied with set_u!, which copies
+        r = init(prob; save_everystep=false)
+        step!(r, 20, true)
+        before = copy(r.u)
+        pulse = ifelse.(r.u .== :I, :R, r.u)
+        SB.set_u!(r, pulse)
+        pulse[1] = :I                                 # the integrator holds a copy
+        @test r.u[1] != :I || before[1] == :I
+        step!(r, 10, true)
+        after = copy(r.u)
+        reinit!(r)
+        step!(r, 20, true)
+        @test r.u == before
+        SB.set_u!(r, ifelse.(r.u .== :I, :R, r.u))
+        step!(r, 10, true)
+        @test r.u == after
+        @test count(==(:I), after) == 0               # the pulse cured every infection
+
+        # layered states
+        layered = CAProblem(LocalRule((c, n, ctx) -> c, VonNeumann(1)),
+                            (a=zeros(Int, 4, 4), b=ones(Int, 4, 4)), 3)
+        li = init(layered; save_everystep=false)
+        SB.set_u!(li, (a=fill(2, 4, 4), b=zeros(Int, 4, 4)))
+        step!(li, 1, true)
+        @test all(==(2), li.u.a) && all(iszero, li.u.b)
+
+        # solutions: the generic successful_retcode would compare the solution itself
+        @test SB.successful_retcode(solve(prob; saveat=60))
+        tp = CAProblem(sir, v, 60, (β=0.4, γ=0.2); seed=1,
+                       callback=DiscreteCallback((u, t, i) -> t == 3, terminate!))
+        @test SB.successful_retcode(solve(tp))       # Terminated counts as success
+
+        # continuous time: a timed step lands exactly on t + dt
+        sis = EventRule(VonNeumann(1)) do c, n, ctx
+            return c == 0 ? (ctx.p.β * count(==(1), n) => 1,) : (ctx.p.γ => 0,)
+        end
+        g0 = zeros(Int, 20, 20)
+        g0[10, 10] = 1
+        g = init(CAProblem(sis, g0, 5.0, (β=1.0, γ=0.5); seed=3), Gillespie();
+                 save_everystep=false)
+        step!(g, 1.25, true)
+        @test g.t == 1.25
+        step!(g, 0.5, true)
+        @test g.t == 1.75
+        step!(g, 0.1, false)
+        @test g.t >= 1.85
+
+        # disturb!: a ready-made pulse
+        u = ones(Int8, 200, 200)
+        disturb!(u, Xoshiro(1); fraction=0.3)
+        @test abs(count(iszero, u) / length(u) - 0.3) <= 4 * sqrt(0.3 * 0.7 / length(u))
+        @test disturb!(ones(Int8, 50), Xoshiro(2); fraction=0.5) ==
+              disturb!(ones(Int8, 50), Xoshiro(2); fraction=0.5)
+        s = fill(:S, 100)
+        s[1:50] .= :I
+        w = Int8[0, 1, 2, 3, 0, 5]
+        @test disturb!(copy(w), Xoshiro(5); fraction=1.0, from=(>(1))) ==
+              Int8[0, 1, 0, 0, 0, 0]
+        disturb!(s, Xoshiro(3); fraction=1.0, value=:R, from=:I)
+        @test count(==(:R), s) == 50 && count(==(:S), s) == 50
+        @test disturb!(ones(Int8, 10), Xoshiro(4); fraction=0.0) == ones(Int8, 10)
+        @test_throws ArgumentError disturb!(ones(3), Xoshiro(1); fraction=1.5)
+    end
 end
